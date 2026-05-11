@@ -1,0 +1,467 @@
+# MotorMindV6 - Auto Mec Bandeirantes
+
+Projeto full stack para a **Auto Mec Bandeirantes**, com **Django 5 + Django REST Framework + PostgreSQL + Redis/Celery + React 18 + Vite + Bootstrap 5**. O sistema contém uma área administrativa própria em React, separada do Django Admin, cobrindo oficina, ordens de serviço, orçamentos, estoque, compras, financeiro, atendimento, mensageria, relatórios e assistente de IA.
+
+## Módulos principais
+
+### Oficina / Ordem de Serviço
+
+- Dashboard operacional da oficina.
+- Cadastro de clientes/contatos.
+- Cadastro de veículos por cliente.
+- Catálogo de serviços/mão de obra.
+- Cadastro de peças com preço, custo, localização, estoque mínimo e estoque atual.
+- Movimentos de estoque com entrada, ajuste, consumo em OS e estorno.
+- Ordens de serviço com número automático no formato `OS-ANO-SEQUENCIA`.
+- Status de OS:
+  - Rascunho
+  - Aberta
+  - Diagnóstico
+  - Aguardando aprovação
+  - Aprovada
+  - Em execução
+  - Conferência
+  - Pronta para entrega
+  - Entregue
+  - Cancelada
+- Prioridade da OS: baixa, normal, alta e urgente.
+- Serviços lançados na OS, com técnico, quantidade, preço, desconto e status.
+- Peças lançadas na OS, com baixa automática de estoque quando a OS é aprovada ou entra em execução.
+- Controle financeiro da OS:
+  - subtotal de serviços
+  - subtotal de peças
+  - descontos
+  - total geral
+  - total pago
+  - saldo pendente
+- Pagamentos por dinheiro, cartão, transferência, MB Way, Pix ou outro método.
+- Linha do tempo/auditoria da OS.
+- Mensagens vinculadas à OS.
+- Regras de notificação automática por mudança de status.
+
+### Mensageria integrada
+
+- Templates de email e WhatsApp.
+- Email com assunto, corpo HTML e fallback texto puro.
+- WhatsApp com texto configurável.
+- Envio manual.
+- Automações agendadas.
+- Histórico de envios.
+- Configurações de email e WhatsApp.
+- Integração com OS para enviar mensagens ao cliente usando dados da OS, veículo, cliente, totais e usuário logado.
+
+
+### UX e design system administrativo
+
+- Área administrativa React com padrão visual único, editável em **Configurações administrativas > Visual e formulários**.
+- Tokens persistidos no backend para tema claro/escuro, cor primária, cor de destaque, cor do menu lateral, densidade de formulários/tabelas, arredondamento, estilo de botão e layout padrão de formulários.
+- Componentes reutilizáveis para novas telas: `AdminFormSection`, `AdminFormGrid`, `AdminField`, `PageHeader`, `DataTable`, `FormTabs`, `ConfirmDialog`, `EmptyState`, `ErrorAlert`, `StatusBadge`, `MoneyInput`, `SearchableSelect`, `AutocompleteInput`, `RichTextEditor` e `SystemToast`.
+- Variáveis CSS globais aplicadas no login via `AuthContext`, mantendo consistência em formulários, modais, cards, tabelas, botões e navegação.
+- Prévia visual em tempo real dentro da própria área administrativa.
+
+Consulte `docs/DESIGN_SYSTEM_ADMIN.md` para o padrão de implementação de novas telas.
+
+## Telas do frontend
+
+- Login
+- Dashboard oficina
+- Ordens de serviço
+- Criação/edição de OS
+- Detalhe da OS
+- Veículos
+- Catálogo de serviços
+- Peças / estoque
+- Movimentos de estoque
+- Notificações automáticas de OS
+- Clientes / contatos
+- Grupos de contatos
+- Templates
+- Criação/edição de template
+- Envio manual
+- Automações
+- Criação/edição de automação
+- Histórico de mensagens
+- Dashboard de mensagens
+- Configurações
+- Usuários administradores
+
+
+## Docker Compose
+
+Copie o ambiente de exemplo e suba todos os serviços:
+
+```bash
+cp .env.docker.example .env
+docker compose up --build
+```
+
+Serviços esperados:
+
+- Frontend: `http://localhost:8080`
+- Backend/API: `http://localhost:8000/api`
+- Health check: `http://localhost:8000/api/health/`
+- Swagger/OpenAPI: `http://localhost:8000/api/docs/`
+- PostgreSQL: serviço `postgres`
+- Redis: serviço `redis`
+- Celery worker: serviço `worker`
+- Celery beat: serviço `beat`
+
+Após subir, execute seeds quando necessário:
+
+```bash
+docker compose exec backend python manage.py migrate
+docker compose exec backend python manage.py create_owner_user
+docker compose exec backend python manage.py seed_workshop_demo
+docker compose exec backend python manage.py seed_test_data
+```
+
+## Como rodar o backend
+
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+python manage.py migrate
+python manage.py createsuperuser
+python manage.py seed_workshop_demo
+python manage.py seed_test_data
+python manage.py test
+python manage.py runserver
+```
+
+No Windows, use:
+
+```bash
+.venv\Scripts\activate
+```
+
+O superusuário criado por `createsuperuser` já fica com `is_staff=True`. A área administrativa React não usa `/admin/`.
+
+O comando `seed_workshop_demo` cria um conjunto mínimo de demonstração para acelerar os primeiros testes.
+
+Para uma massa mais completa e realística, use:
+
+```bash
+python manage.py seed_test_data
+```
+
+Esse seed cria/atualiza clientes, veículos, fornecedores, peças, serviços e pacotes com descontos no pacote. Ele é idempotente: pode ser executado mais de uma vez sem duplicar os registros de teste.
+
+## Como rodar o frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Por padrão, o frontend aponta para:
+
+```text
+http://localhost:8000/api
+```
+
+Para alterar:
+
+```bash
+VITE_API_URL=http://localhost:8000/api npm run dev
+```
+
+## Configuração de email
+
+Em desenvolvimento, o `.env.example` usa:
+
+```env
+EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend
+```
+
+Assim os emails aparecem no terminal do Django, sem tentar conectar em SMTP real.
+
+### Links públicos enviados por email
+
+Os links enviados por email, incluindo definição/redefinição de senha e aprovações públicas, usam `FRONTEND_BASE_URL`. Em produção, configure obrigatoriamente essa variável com o domínio público do frontend, nunca com `localhost`:
+
+```env
+FRONTEND_BASE_URL=https://app.seudominio.com
+CORS_ALLOWED_ORIGINS=https://app.seudominio.com
+CSRF_TRUSTED_ORIGINS=https://app.seudominio.com
+```
+
+Se `FRONTEND_BASE_URL` estiver ausente ou ainda apontando para localhost em produção, o envio de definição de senha tenta usar o `Origin`/`Referer` permitido da requisição feita pela área administrativa. Ainda assim, a configuração explícita por ambiente é o caminho recomendado para produção. Consulte `docs/CORRECAO_LINK_REDEFINICAO_SENHA_PROD.md`.
+
+Para produção, configure um SMTP válido:
+
+```env
+EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
+EMAIL_HOST=smtp.seudominio.com
+EMAIL_PORT=587
+EMAIL_HOST_USER=usuario-ou-apikey
+EMAIL_HOST_PASSWORD=senha-ou-token
+EMAIL_USE_TLS=True
+EMAIL_USE_SSL=False
+DEFAULT_FROM_EMAIL=no-reply@seudominio.com
+```
+
+Não use `smtp.example.com`, pois isso causa erro de DNS como `[Errno 11001] getaddrinfo failed`.
+
+## WhatsApp
+
+Em desenvolvimento, use o provider `dummy` pelo `.env` para testar sem chamar API externa. Para Meta Cloud API, configure provider, token, Phone Number ID, versão da API e preview de links em `backend/.env`. O painel administrativo exibe o status da configuração sem gravar segredos sensíveis.
+
+O campo **ID do número remetente Meta** não é o telefone do cliente. Os telefones dos clientes ficam em **Clientes / contatos > WhatsApp E.164**, por exemplo:
+
+```text
++351912345678
+```
+
+## Variáveis dos templates
+
+Use sintaxe Django Template, por exemplo:
+
+```django
+Olá {{ nome_cliente }}, sua OS {{ numero_os }} está {{ status_os }}.
+Total: {{ total_os }}.
+```
+
+### Usuário logado / remetente
+
+- `{{ nome_usuario }}`
+- `{{ email_usuario }}`
+- `{{ usuario.username }}`
+- `{{ usuario.first_name }}`
+- `{{ usuario.last_name }}`
+- `{{ usuario_logado.full_name }}`
+- `{{ remetente.email }}`
+
+### Destinatário atual
+
+- `{{ nome_destinatario }}`
+- `{{ email_destinatario }}`
+- `{{ telefone_destinatario }}`
+- `{{ destinatario.nome }}`
+- `{{ destinatario.email }}`
+- `{{ destinatario.telefone }}`
+
+### Contato / cliente
+
+- `{{ nome_contato }}`
+- `{{ contato.first_name }}`
+- `{{ contato.last_name }}`
+- `{{ contato.email }}`
+- `{{ contato.phone_e164 }}`
+- `{{ custom.campo }}`
+- `{{ nome_cliente }}`
+- `{{ email_cliente }}`
+- `{{ telefone_cliente }}`
+- `{{ cliente.nome }}`
+- `{{ cliente.email }}`
+- `{{ cliente.telefone }}`
+
+### Ordem de serviço
+
+- `{{ numero_os }}`
+- `{{ status_os }}`
+- `{{ total_os }}`
+- `{{ saldo_os }}`
+- `{{ os.numero }}`
+- `{{ os.status_label }}`
+- `{{ os.titulo }}`
+- `{{ os.reclamacao }}`
+- `{{ os.diagnostico }}`
+- `{{ os.solucao }}`
+- `{{ os.total_servicos }}`
+- `{{ os.total_pecas }}`
+- `{{ os.total }}`
+- `{{ os.pago }}`
+- `{{ os.saldo }}`
+- `{{ os.previsao }}`
+
+### Veículo
+
+- `{{ placa_veiculo }}`
+- `{{ modelo_veiculo }}`
+- `{{ veiculo.placa }}`
+- `{{ veiculo.marca }}`
+- `{{ veiculo.modelo }}`
+- `{{ veiculo.versao }}`
+- `{{ veiculo.ano }}`
+- `{{ veiculo.cor }}`
+- `{{ veiculo.km }}`
+- `{{ veiculo.display }}`
+
+## Regras automáticas de OS
+
+Na tela **Notificações de OS**, configure regras como:
+
+- Quando a OS mudar para **Aguardando aprovação**, enviar WhatsApp pedindo aprovação.
+- Quando a OS mudar para **Pronta para entrega**, enviar email informando total e saldo.
+- Quando a OS mudar para **Entregue**, enviar mensagem de agradecimento.
+
+Cada regra tem:
+
+- nome
+- status gatilho
+- canal
+- template
+- ativo/inativo
+- opção de enviar apenas uma vez por status em cada OS
+
+As regras são executadas automaticamente quando o status é alterado pela tela da OS. Também há o botão **Rodar regras automáticas** no detalhe da OS.
+
+## API principal
+
+Base:
+
+```text
+/api/
+```
+
+Endpoints de oficina:
+
+```text
+/api/workshop/dashboard/
+/api/workshop/vehicles/
+/api/workshop/services/
+/api/workshop/parts/
+/api/workshop/parts/{id}/adjust_stock/
+/api/workshop/stock-movements/
+/api/workshop/work-orders/
+/api/workshop/work-orders/{id}/change_status/
+/api/workshop/work-orders/{id}/send_message/
+/api/workshop/work-orders/{id}/trigger_notifications/
+/api/workshop/work-order-services/
+/api/workshop/work-order-parts/
+/api/workshop/work-order-payments/
+/api/workshop/work-order-events/
+/api/workshop/work-order-messages/
+/api/workshop/notification-rules/
+```
+
+Endpoints de mensageria já existentes:
+
+```text
+/api/auth/login/
+/api/auth/refresh/
+/api/auth/me/
+/api/contacts/
+/api/groups/
+/api/templates/
+/api/send/manual/
+/api/automations/
+/api/logs/
+/api/settings/
+/api/users/
+```
+
+## Estoque e baixa automática
+
+Ao aprovar a OS ou mover para **Em execução**, o backend tenta consumir o estoque das peças lançadas na OS que estejam marcadas com `consume_inventory=True`.
+
+Se uma peça não tiver estoque suficiente, a mudança de status é bloqueada com erro de validação. Isso evita que a oficina aprove/inicie uma OS que não possui peças suficientes no estoque.
+
+## Estrutura
+
+```text
+backend/
+  config/
+  messaging/
+    models.py
+    serializers.py
+    services.py
+    views.py
+    providers/
+    management/commands/process_due_automations.py
+  workshop/
+    models.py
+    serializers.py
+    services.py
+    views.py
+    urls.py
+    management/commands/seed_workshop_demo.py
+frontend/
+  src/
+    api/
+    auth/
+    components/
+    pages/
+    workshopOptions.js
+```
+
+## Validação feita no pacote
+
+Foram executadas validações de sintaxe:
+
+```bash
+python -m compileall config messaging workshop
+```
+
+E validação estática dos arquivos React/JSX com `tsc --noEmit`. O build final com `npm run build` deve ser executado no seu ambiente depois de instalar as dependências com `npm install`.
+
+## Próximos ajustes recomendados para produção
+
+- Criar permissões por perfil: atendente, mecânico, gerente e financeiro.
+- Adicionar impressão/PDF de OS e orçamento.
+- Adicionar assinatura digital do cliente para aprovação.
+- Criar aceite de orçamento por link público seguro.
+- Adicionar fotos/anexos de diagnóstico e execução.
+- Criar suporte a templates oficiais do WhatsApp fora da janela de atendimento.
+- Adicionar testes automatizados e OpenAPI/Swagger.
+- Armazenar tokens e senhas em vault/secret manager.
+- Adicionar opt-in, opt-out e trilha LGPD/RGPD por contato.
+
+## Alterações recentes
+
+- CRUD de categorias gerais em `/api/workshop/categories/` e tela `/categories` no frontend.
+- Integração FIPE via proxy backend usando a API Parallelum:
+  - `/api/workshop/fipe/brands/?vehicle_type=carros`
+  - `/api/workshop/fipe/models/?vehicle_type=carros&brand_code=<codigo>`
+  - `/api/workshop/fipe/years/?vehicle_type=carros&brand_code=<codigo>&model_code=<codigo>`
+  - `/api/workshop/fipe/detail/?vehicle_type=carros&brand_code=<codigo>&model_code=<codigo>&year_code=<codigo>`
+- Cadastro de veículos agora possui selects encadeados de marca, modelo e ano/versão FIPE para carros, mantendo campos manuais editáveis.
+
+Após atualizar o backend, execute:
+
+```bash
+python manage.py migrate
+```
+
+
+## Aprovação digital por e-mail
+
+Em desenvolvimento, mantenha `EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend` no `backend/.env`. Ao gerar a aprovação digital de uma OS, o backend envia o link por e-mail e o conteúdo aparece no terminal/log onde `python manage.py runserver` está rodando. Configure `FRONTEND_BASE_URL=http://localhost:5173` para Vite local ou `FRONTEND_BASE_URL=http://localhost:8080` para Docker local. Em produção, use o domínio público real do frontend.
+
+Para facilitar a homologação, o backend também imprime explicitamente o conteúdo do e-mail no console com o marcador:
+
+```text
+APROVACAO DIGITAL - EMAIL DE TESTE
+```
+
+Se estiver usando Docker, veja esse conteúdo com:
+
+```bash
+docker compose logs -f backend
+```
+
+## Assistente de IA
+
+O sistema possui um módulo de apoio à escrita para relato do cliente, diagnóstico, serviço realizado e textos de e-mail/WhatsApp.
+
+Configuração:
+
+1. Rode as migrations: `cd backend && python manage.py migrate`.
+2. Acesse o admin do Django.
+3. Abra **Assistente de IA > Configurações de IA**.
+4. Configure OpenAI e/ou Gemini com API key, modelo, provedor ativo e marque qual será o padrão.
+5. No sistema, use o botão **IA** nos campos de OS, Bancada Técnica e Templates.
+
+As chaves da OpenAI/Gemini não ficam no `.env`; ficam somente no admin do Django.
+
+## Módulo de IA - prompts configuráveis
+
+As chaves e o provedor de IA são configurados somente no admin do Django em **Assistente de IA > Configurações de IA**. O usuário comum não escolhe OpenAI/Gemini nas telas; o sistema usa o provedor ativo/padrão do admin.
+
+Também é possível cadastrar múltiplos prompts em **Assistente de IA > Prompts de IA**. Cada prompt pode ser associado a uma finalidade, como relato do cliente, diagnóstico, serviço realizado, email, WhatsApp ou templates. Nas telas, o usuário escolhe apenas o prompt que deseja aplicar.
+
+Se a resposta sair cortada, aumente o campo **max_tokens** na configuração de IA do admin. O padrão novo é 2500 tokens.

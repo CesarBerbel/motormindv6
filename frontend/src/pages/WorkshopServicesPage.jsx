@@ -1,0 +1,638 @@
+import React, { useEffect, useMemo, useState } from "react";
+import { Alert, Button, Card, Col, Form, Modal, Row, Table } from "react-bootstrap";
+import IntegerInput from "../components/IntegerInput";
+import api, { apiError, results } from "../api/client";
+import EmptyState from "../components/EmptyState";
+import ErrorAlert from "../components/ErrorAlert";
+import FormTabs, { TabPanel } from "../components/FormTabs";
+import TabbedFormFooter, { InlineTabbedFormFooter } from "../components/TabbedFormFooter";
+import MoneyInput from "../components/MoneyInput";
+import PageHeader from "../components/PageHeader";
+import AreaTabs from "../components/AreaTabs";
+import SearchableSelect from "../components/SearchableSelect";
+import { money } from "../workshopOptions";
+import SearchAutocompleteInput from "../components/SearchAutocompleteInput";
+import { confirmDialog } from "../components/ConfirmDialog";
+
+const empty = () => ({
+  code: "",
+  name: "",
+  category_id: "",
+  legacy_category_name: "",
+  description: "",
+  default_unit_price: "",
+  estimated_hours: "",
+  is_featured: false,
+  is_active: true,
+});
+
+const tabs = [
+  { key: "identification", label: "Identificação", description: "Código, nome e categoria" },
+  { key: "pricing", label: "Preço e tempo", description: "Preço padrão e horas" },
+  { key: "photo", label: "Thumbnail", description: "Imagem do card na OS" },
+  { key: "default_parts", label: "Peças padrão", description: "Auto inclusão no orçamento e na OS" },
+  { key: "checklist", label: "Checklist técnico", description: "Itens padrão da execução" },
+  { key: "details", label: "Detalhes", description: "Descrição e status" },
+];
+
+function serviceSearchSuggestion(service) {
+  const title = [service.code, service.name].filter(Boolean).join(" - ") || "Serviço sem nome";
+  const category = service.category_name || service.legacy_category_name || "Sem categoria";
+  const price = `Preço: ${money(service.default_unit_price)}`;
+  const hours = service.estimated_hours ? `Horas: ${service.estimated_hours}` : "Horas: 0.00";
+  const usage = `Uso em OS: ${service.usage_count || 0}`;
+  const featured = service.is_featured ? "Preferido" : "Não preferido";
+  const status = service.is_active ? "Ativo" : "Inativo";
+
+  return {
+    key: service.id,
+    label: title,
+    value: title,
+    description: [category, price, hours].filter(Boolean).join(" • "),
+    meta: [usage, featured, status, service.description].filter(Boolean).join(" • "),
+    payload: service,
+    searchText: [
+      title,
+      service.code,
+      service.name,
+      category,
+      service.category_name,
+      service.legacy_category_name,
+      service.description,
+      service.default_unit_price,
+      service.estimated_hours,
+      usage,
+      featured,
+      status,
+    ].filter(Boolean).join(" "),
+  };
+}
+
+function buildServiceSearchSuggestions(services) {
+  return (services || []).map(serviceSearchSuggestion);
+}
+
+export default function WorkshopServicesPage() {
+  const [items, setItems] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [parts, setParts] = useState([]);
+  const [form, setForm] = useState(empty());
+  const [photoFile, setPhotoFile] = useState(null);
+  const [removePhoto, setRemovePhoto] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [show, setShow] = useState(false);
+  const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("");
+  const [activeTab, setActiveTab] = useState("identification");
+  const [error, setError] = useState("");
+  const [checklistTemplates, setChecklistTemplates] = useState([]);
+  const [defaultParts, setDefaultParts] = useState([]);
+  const [newChecklistItem, setNewChecklistItem] = useState({ description: "", is_required: true, requires_photo: false, requires_note: false, sort_order: 0, is_active: true });
+  const [newDefaultPart, setNewDefaultPart] = useState({ part_id: "", quantity: "1.00", unit_price: "", discount_amount: "0.00", consume_inventory: true, notes: "", position: 0, is_active: true });
+
+  const categoryOptions = [
+    { value: "", label: "Sem categoria" },
+    ...categories.map((category) => ({ value: category.id, label: category.name })),
+  ];
+  const categoryFilterOptions = [
+    { value: "", label: "Todas as categorias" },
+    ...categories.map((category) => ({ value: category.id, label: category.name })),
+  ];
+  const partOptions = useMemo(() => [
+    { value: "", label: "Selecione uma peça", description: "Peça que será sugerida automaticamente quando este serviço for usado." },
+    ...parts.map((part) => ({
+      value: part.id,
+      label: [part.sku, part.name].filter(Boolean).join(" - "),
+      description: part.category_name || part.brand || "Peça cadastrada",
+      meta: `Venda: ${money(part.sale_price || 0)} · Estoque: ${part.stock_quantity ?? 0} ${part.unit || "un"}`,
+    })),
+  ], [parts]);
+
+  async function load(nextSearch = search, nextCategoryFilter = categoryFilter) {
+    const normalizedSearch = String(nextSearch || "").trim();
+    const normalizedCategory = String(nextCategoryFilter || "").trim();
+
+    try {
+      const params = {};
+      if (normalizedSearch) params.search = normalizedSearch;
+      if (normalizedCategory) params.category = normalizedCategory;
+      const [servicesRes, categoriesRes, partsRes] = await Promise.all([
+        api.get("/workshop/services/", { params: { ...params, ordering: "most_used" } }),
+        api.get("/workshop/categories/", { params: { type: "service", active: "true" } }),
+        api.get("/workshop/parts/", { params: { active: "true", ordering: "most_used" } }),
+      ]);
+      setItems(results(servicesRes.data));
+      setCategories(results(categoriesRes.data));
+      setParts(results(partsRes.data));
+    } catch (err) {
+      setError(apiError(err));
+    }
+  }
+
+  function clearSearch() {
+    setSearch("");
+    setCategoryFilter("");
+    load("", "");
+  }
+
+  function selectServiceSuggestion(suggestion, nextValue) {
+    const selectedService = suggestion?.payload;
+    setSearch(nextValue || "");
+
+    if (selectedService?.id) {
+      setItems([selectedService]);
+      return;
+    }
+
+    load(nextValue, categoryFilter);
+  }
+
+  function handleCategoryFilterChange(value) {
+    setCategoryFilter(value);
+    load(search, value);
+  }
+
+  async function nextServiceCode() {
+    try {
+      const { data } = await api.get("/workshop/services/next-code/");
+      return data?.code || "";
+    } catch (err) {
+      setError(apiError(err));
+      return "";
+    }
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  async function loadChecklistTemplates(serviceId) {
+    if (!serviceId) {
+      setChecklistTemplates([]);
+      return;
+    }
+    try {
+      const { data } = await api.get("/workshop/service-checklist-templates/", { params: { service: serviceId } });
+      setChecklistTemplates(results(data));
+    } catch (err) {
+      setError(apiError(err));
+    }
+  }
+
+  function update(patch) {
+    setForm((current) => ({ ...current, ...patch }));
+  }
+
+  async function open(item = null) {
+    setEditing(item);
+    setActiveTab("identification");
+    setPhotoFile(null);
+    setRemovePhoto(false);
+    if (item) {
+      loadChecklistTemplates(item.id);
+      loadDefaultParts(item.id);
+    } else {
+      setChecklistTemplates([]);
+      setDefaultParts([]);
+    }
+    if (item) {
+      setForm({
+        code: item.code || "",
+        name: item.name || "",
+        category_id: item.category || "",
+        legacy_category_name: item.legacy_category_name || "",
+        description: item.description || "",
+        default_unit_price: item.default_unit_price || "0.00",
+        estimated_hours: item.estimated_hours || "0.00",
+        is_featured: !!item.is_featured,
+        is_active: !!item.is_active,
+      });
+    } else {
+      const nextCode = await nextServiceCode();
+      setForm({ ...empty(), code: nextCode });
+    }
+    setShow(true);
+  }
+
+  async function save(event) {
+    event.preventDefault();
+    try {
+      const payload = {
+        ...form,
+        category_id: form.category_id ? Number(form.category_id) : "",
+        remove_photo: removePhoto ? "true" : "false",
+      };
+      const formData = new FormData();
+      Object.entries(payload).forEach(([key, value]) => formData.append(key, value ?? ""));
+      if (photoFile) formData.append("photo", photoFile);
+      if (editing) {
+        await api.put(`/workshop/services/${editing.id}/`, formData);
+      } else {
+        await api.post("/workshop/services/", formData);
+      }
+      setShow(false);
+      await load();
+    } catch (err) {
+      setError(apiError(err));
+    }
+  }
+
+
+  async function loadDefaultParts(serviceId) {
+    if (!serviceId) {
+      setDefaultParts([]);
+      return;
+    }
+    try {
+      const { data } = await api.get("/workshop/service-default-parts/", { params: { service: serviceId } });
+      setDefaultParts(results(data));
+    } catch (err) {
+      setError(apiError(err));
+    }
+  }
+
+  function selectDefaultPart(partId) {
+    const selected = parts.find((part) => String(part.id) === String(partId));
+    setNewDefaultPart((current) => ({
+      ...current,
+      part_id: partId,
+      unit_price: selected?.sale_price || current.unit_price || "0.00",
+    }));
+  }
+
+  async function addDefaultPart() {
+    if (!editing?.id) {
+      setError("Salve o serviço antes de vincular peças padrão.");
+      return;
+    }
+    if (!newDefaultPart.part_id) {
+      setError("Selecione a peça padrão do serviço.");
+      return;
+    }
+    try {
+      await api.post("/workshop/service-default-parts/", {
+        ...newDefaultPart,
+        service: editing.id,
+        part_id: Number(newDefaultPart.part_id),
+        quantity: newDefaultPart.quantity || "1.00",
+        unit_price: newDefaultPart.unit_price || "0.00",
+        discount_amount: newDefaultPart.discount_amount || "0.00",
+      });
+      setNewDefaultPart({ part_id: "", quantity: "1.00", unit_price: "", discount_amount: "0.00", consume_inventory: true, notes: "", position: defaultParts.length + 1, is_active: true });
+      await loadDefaultParts(editing.id);
+    } catch (err) {
+      setError(apiError(err));
+    }
+  }
+
+  async function updateDefaultPart(item) {
+    try {
+      await api.patch(`/workshop/service-default-parts/${item.id}/`, {
+        service: editing.id,
+        part_id: item.part || item.part_id,
+        quantity: item.quantity || "1.00",
+        unit_price: item.unit_price || "0.00",
+        discount_amount: item.discount_amount || "0.00",
+        consume_inventory: !!item.consume_inventory,
+        notes: item.notes || "",
+        position: item.position || 0,
+        is_active: !!item.is_active,
+      });
+      await loadDefaultParts(editing.id);
+    } catch (err) {
+      setError(apiError(err));
+    }
+  }
+
+  async function removeDefaultPart(item) {
+    if (!(await confirmDialog(`Remover peça padrão: ${item.part_sku || ""} ${item.part_name || ""}?`))) return;
+    try {
+      await api.delete(`/workshop/service-default-parts/${item.id}/`);
+      await loadDefaultParts(editing.id);
+    } catch (err) {
+      setError(apiError(err));
+    }
+  }
+
+  async function addChecklistTemplate() {
+    if (!editing?.id) {
+      setError("Salve o serviço antes de cadastrar o checklist técnico.");
+      return;
+    }
+    try {
+      await api.post("/workshop/service-checklist-templates/", { ...newChecklistItem, service: editing.id });
+      setNewChecklistItem({ description: "", is_required: true, requires_photo: false, requires_note: false, sort_order: checklistTemplates.length + 1, is_active: true });
+      await loadChecklistTemplates(editing.id);
+    } catch (err) {
+      setError(apiError(err));
+    }
+  }
+
+  async function updateChecklistTemplate(item) {
+    try {
+      await api.patch(`/workshop/service-checklist-templates/${item.id}/`, item);
+      await loadChecklistTemplates(editing.id);
+    } catch (err) {
+      setError(apiError(err));
+    }
+  }
+
+  async function removeChecklistTemplate(item) {
+    if (!(await confirmDialog(`Excluir item do checklist: ${item.description}?`))) return;
+    try {
+      await api.delete(`/workshop/service-checklist-templates/${item.id}/`);
+      await loadChecklistTemplates(editing.id);
+    } catch (err) {
+      setError(apiError(err));
+    }
+  }
+
+  async function remove(item) {
+    if (!(await confirmDialog(`Excluir ${item.name}?`))) return;
+    try {
+      await api.delete(`/workshop/services/${item.id}/`);
+      await load();
+    } catch (err) {
+      setError(apiError(err));
+    }
+  }
+
+  return <>
+    <PageHeader title="Catálogo de serviços" subtitle="Serviços padrão usados nas OS, com categoria pesquisável por dropdown.">
+      <Button onClick={() => open()}>Novo serviço</Button>
+    </PageHeader>
+
+    <AreaTabs area="technical" />
+    <ErrorAlert error={error} onClose={() => setError("")}/>
+
+    <Card className="border-0 shadow-sm mb-3">
+      <Card.Body>
+        <Row className="g-2 align-items-end">
+          <Col md={7}>
+            <Form.Label>Busca</Form.Label>
+            <SearchAutocompleteInput
+              placeholder="Buscar por código, nome, categoria, preço, horas, descrição ou status"
+              value={search}
+              onChange={setSearch}
+              onSearch={(value) => load(value, categoryFilter)}
+              onSelect={selectServiceSuggestion}
+              suggestions={buildServiceSearchSuggestions(items)}
+            />
+          </Col>
+          <Col md={3}>
+            <SearchableSelect
+              label="Categoria"
+              value={categoryFilter}
+              options={categoryFilterOptions}
+              onChange={handleCategoryFilterChange}
+              placeholder="Pesquisar categoria"
+            />
+          </Col>
+          <Col md={2}>
+            <Button className="w-100" variant="outline-secondary" onClick={clearSearch} disabled={!search && !categoryFilter}>Limpar pesquisa</Button>
+          </Col>
+        </Row>
+      </Card.Body>
+    </Card>
+
+    <Card className="border-0 shadow-sm">
+      <Card.Body className="p-0">
+        {items.length === 0 ? <EmptyState/> : <Table responsive hover className="mb-0">
+          <thead>
+            <tr>
+              <th>Foto</th>
+              <th>Código</th>
+              <th>Nome</th>
+              <th>Categoria</th>
+              <th>Preço</th>
+              <th>Horas</th>
+              <th>Preferido</th>
+              <th>Uso em OS</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((item) => <tr key={item.id}>
+              <td>{item.photo_url ? <img className="table-thumb" src={item.photo_url} alt={`Foto ${item.name}`} /> : <span className="text-muted">-</span>}</td>
+              <td>{item.code || "-"}</td>
+              <td className="fw-semibold">{item.name}</td>
+              <td>{item.category_name || "-"}</td>
+              <td>{money(item.default_unit_price)}</td>
+              <td>{item.estimated_hours}</td>
+              <td>{item.is_featured ? <span className="badge text-bg-primary">Sim</span> : <span className="text-muted">Não</span>}</td>
+              <td>{item.usage_count || 0}</td>
+              <td>{item.is_active ? "Ativo" : "Inativo"}</td>
+              <td className="text-end">
+                <Button size="sm" variant="outline-primary" onClick={() => open(item)} className="me-2">Editar</Button>
+                <Button size="sm" variant="outline-danger" onClick={() => remove(item)}>Excluir</Button>
+              </td>
+            </tr>)}
+          </tbody>
+        </Table>}
+      </Card.Body>
+    </Card>
+
+    <Modal keyboard={false} backdrop="static" size="xl" dialogClassName="modal-wide-tabs" show={show} onHide={() => setShow(false)} className="floating-form-modal">
+      <Form onSubmit={save}>
+        <Modal.Header closeButton>
+          <Modal.Title>{editing ? "Editar" : "Novo"} serviço</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <FormTabs tabs={tabs} activeKey={activeTab} onSelect={setActiveTab} />
+
+          <TabPanel activeKey={activeTab} eventKey="identification">
+            <Card className="form-section-card">
+              <Card.Body>
+                <div className="form-section-title">Identificação do serviço</div>
+                <Row className="g-3">
+                  <Col md={4}>
+                    <Form.Label>Código</Form.Label>
+                    <Form.Control value={form.code || ""} onChange={(event) => update({ code: event.target.value.toUpperCase() })}/>
+                  </Col>
+                  <Col md={8}>
+                    <Form.Label>Nome</Form.Label>
+                    <Form.Control required value={form.name} onChange={(event) => update({ name: event.target.value })}/>
+                  </Col>
+                  <Col md={6}>
+                    <SearchableSelect
+                      label="Categoria"
+                      value={form.category_id || ""}
+                      options={categoryOptions}
+                      onChange={(value) => update({ category_id: value })}
+                      placeholder="Pesquisar categoria"
+                      helpText={categories.length === 0 ? "Cadastre categorias do tipo Serviço na tela Categorias." : "Digite para filtrar as categorias cadastradas."}
+                    />
+                  </Col>
+                </Row>
+              </Card.Body>
+            </Card>
+          </TabPanel>
+
+          <TabPanel activeKey={activeTab} eventKey="pricing">
+            <Card className="form-section-card">
+              <Card.Body>
+                <div className="form-section-title">Preço padrão e estimativa</div>
+                <Row className="g-3">
+                  <Col md={6}>
+                    <Form.Label>Preço padrão</Form.Label>
+                    <MoneyInput value={form.default_unit_price} onChange={(value) => update({ default_unit_price: value })}/>
+                  </Col>
+                  <Col md={6}>
+                    <Form.Label>Horas</Form.Label>
+                    <IntegerInput step="0.01" value={form.estimated_hours} onChange={(event) => update({ estimated_hours: event.target.value })}/>
+                  </Col>
+                </Row>
+              </Card.Body>
+            </Card>
+          </TabPanel>
+
+          <TabPanel activeKey={activeTab} eventKey="photo">
+            <Card className="form-section-card">
+              <Card.Body>
+                <div className="form-section-title">Thumbnail do serviço</div>
+                <Row className="g-3 align-items-center">
+                  <Col md={5}>
+                    <div className="image-preview-card">
+                      {photoFile ? (
+                        <img src={URL.createObjectURL(photoFile)} alt="Prévia do serviço" />
+                      ) : !removePhoto && editing?.photo_url ? (
+                        <img src={editing.photo_url} alt={`Foto ${editing.name}`} />
+                      ) : (
+                        <span className="text-muted">Sem thumbnail cadastrado</span>
+                      )}
+                    </div>
+                  </Col>
+                  <Col md={7}>
+                    <Form.Label>Arquivo do thumbnail</Form.Label>
+                    <Form.Control
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      onChange={(event) => { setPhotoFile(event.target.files?.[0] || null); setRemovePhoto(false); }}
+                    />
+                    <Form.Text>Use uma imagem simples para aparecer no card de seleção da OS. Tamanho máximo validado no backend: 5 MB.</Form.Text>
+                    <div className="d-flex gap-2 mt-3">
+                      <Button type="button" variant="outline-secondary" onClick={() => { setPhotoFile(null); setRemovePhoto(false); }}>Limpar seleção</Button>
+                      {editing?.photo_url || photoFile ? <Button type="button" variant="outline-danger" onClick={() => { setPhotoFile(null); setRemovePhoto(true); }}>Remover thumbnail</Button> : null}
+                    </div>
+                  </Col>
+                </Row>
+              </Card.Body>
+            </Card>
+          </TabPanel>
+
+
+          <TabPanel activeKey={activeTab} eventKey="default_parts">
+            <Card className="form-section-card">
+              <Card.Body>
+                <div className="form-section-title">Peças padrão vinculadas ao serviço</div>
+                <p className="text-muted small mb-3">Quando este serviço for adicionado a um orçamento ou OS, as peças ativas abaixo entram automaticamente como sugestão vinculada ao serviço. O atendente ainda pode ajustar quantidade, preço e desconto antes de salvar.</p>
+                {!editing ? <div className="alert alert-info mb-3">Salve o serviço antes de cadastrar peças padrão.</div> : null}
+                {editing ? <>
+                  {defaultParts.length ? <div className="line-builder-stack mb-3">
+                    {defaultParts.map((item, index) => (
+                      <div className="line-builder-card" key={item.id}>
+                        <div className="line-builder-card-header">
+                          <div className="d-flex gap-2 align-items-start">
+                            <span className="line-builder-index">{index + 1}</span>
+                            <div>
+                              <div className="line-builder-title">{item.part_sku ? `${item.part_sku} - ` : ""}{item.part_name}</div>
+                              <div className="line-builder-meta">Estoque: {item.part_stock_quantity ?? 0} {item.part_unit || "un"} · Preço cadastrado: {money(item.part_sale_price || 0)}</div>
+                            </div>
+                          </div>
+                          <div className="line-builder-total"><span>Total</span><strong>{money(item.total_amount || 0)}</strong></div>
+                        </div>
+                        <Row className="g-3 align-items-end">
+                          <Col md={2}><Form.Label>Ordem</Form.Label><IntegerInput value={item.position || 0} onChange={(event) => setDefaultParts((current) => current.map((row) => row.id === item.id ? { ...row, position: event.target.value } : row))} /></Col>
+                          <Col md={2}><Form.Label>Qtd.</Form.Label><IntegerInput min="0.01" step="0.01" value={item.quantity || "1.00"} onChange={(event) => setDefaultParts((current) => current.map((row) => row.id === item.id ? { ...row, quantity: event.target.value } : row))} /></Col>
+                          <Col md={3}><Form.Label>Unitário</Form.Label><MoneyInput value={item.unit_price || "0.00"} onChange={(value) => setDefaultParts((current) => current.map((row) => row.id === item.id ? { ...row, unit_price: value } : row))} /></Col>
+                          <Col md={3}><Form.Label>Desconto</Form.Label><MoneyInput value={item.discount_amount || "0.00"} onChange={(value) => setDefaultParts((current) => current.map((row) => row.id === item.id ? { ...row, discount_amount: value } : row))} /></Col>
+                          <Col md={2}><Form.Check label="Ativa" checked={!!item.is_active} onChange={(event) => setDefaultParts((current) => current.map((row) => row.id === item.id ? { ...row, is_active: event.target.checked } : row))} /></Col>
+                          <Col md={8}><Form.Label>Observação padrão</Form.Label><Form.Control value={item.notes || ""} onChange={(event) => setDefaultParts((current) => current.map((row) => row.id === item.id ? { ...row, notes: event.target.value } : row))} placeholder="Ex.: trocar junto com a mão de obra" /></Col>
+                          <Col md={4} className="line-builder-actions"><Form.Check label="Consumir estoque na OS" checked={!!item.consume_inventory} onChange={(event) => setDefaultParts((current) => current.map((row) => row.id === item.id ? { ...row, consume_inventory: event.target.checked } : row))} /><Button size="sm" variant="outline-primary" type="button" onClick={() => updateDefaultPart(item)}>Salvar</Button><Button size="sm" variant="outline-danger" type="button" onClick={() => removeDefaultPart(item)}>Remover</Button></Col>
+                        </Row>
+                      </div>
+                    ))}
+                  </div> : <Alert variant="light" className="border">Nenhuma peça padrão vinculada. Use o bloco abaixo para criar a primeira sugestão automática.</Alert>}
+                  <div className="border rounded p-3 bg-light">
+                    <div className="fw-semibold mb-2">Nova peça padrão</div>
+                    <Row className="g-2 align-items-end">
+                      <Col md={5}>
+                        <SearchableSelect label="Peça" value={newDefaultPart.part_id || ""} options={partOptions} onChange={selectDefaultPart} placeholder="Pesquisar peça" emptyMessage="Nenhuma peça encontrada." />
+                      </Col>
+                      <Col md={2}><Form.Label>Qtd.</Form.Label><IntegerInput min="0.01" step="0.01" value={newDefaultPart.quantity} onChange={(event) => setNewDefaultPart({ ...newDefaultPart, quantity: event.target.value })} /></Col>
+                      <Col md={2}><Form.Label>Unitário</Form.Label><MoneyInput value={newDefaultPart.unit_price} onChange={(value) => setNewDefaultPart({ ...newDefaultPart, unit_price: value })} /></Col>
+                      <Col md={2}><Form.Label>Desconto</Form.Label><MoneyInput value={newDefaultPart.discount_amount} onChange={(value) => setNewDefaultPart({ ...newDefaultPart, discount_amount: value })} /></Col>
+                      <Col md={1}><Form.Label>Ordem</Form.Label><IntegerInput value={newDefaultPart.position} onChange={(event) => setNewDefaultPart({ ...newDefaultPart, position: event.target.value })} /></Col>
+                      <Col md={8}><Form.Label>Observação padrão</Form.Label><Form.Control value={newDefaultPart.notes} onChange={(event) => setNewDefaultPart({ ...newDefaultPart, notes: event.target.value })} /></Col>
+                      <Col md={4} className="d-flex flex-wrap gap-3 align-items-center">
+                        <Form.Check label="Consumir estoque na OS" checked={!!newDefaultPart.consume_inventory} onChange={(event) => setNewDefaultPart({ ...newDefaultPart, consume_inventory: event.target.checked })} />
+                        <Form.Check label="Ativa" checked={!!newDefaultPart.is_active} onChange={(event) => setNewDefaultPart({ ...newDefaultPart, is_active: event.target.checked })} />
+                      </Col>
+                    </Row>
+                    <Button type="button" variant="outline-success" className="mt-3" onClick={addDefaultPart}>Adicionar peça padrão</Button>
+                  </div>
+                </> : null}
+              </Card.Body>
+            </Card>
+          </TabPanel>
+
+          <TabPanel activeKey={activeTab} eventKey="checklist">
+            <Card className="form-section-card">
+              <Card.Body>
+                <div className="form-section-title">Checklist técnico padrão</div>
+                {!editing ? <div className="alert alert-info mb-3">Salve o serviço antes de cadastrar itens de checklist.</div> : null}
+                {editing ? <>
+                  <Table responsive size="sm" className="align-middle">
+                    <thead><tr><th>Ordem</th><th>Descrição</th><th>Obrig.</th><th>Foto</th><th>Obs.</th><th>Ativo</th><th></th></tr></thead>
+                    <tbody>
+                      {checklistTemplates.map((item) => (
+                        <tr key={item.id}>
+                          <td style={{ width: 90 }}><IntegerInput value={item.sort_order || 0} onChange={(event) => setChecklistTemplates((current) => current.map((row) => row.id === item.id ? { ...row, sort_order: event.target.value } : row))} /></td>
+                          <td><Form.Control value={item.description || ""} onChange={(event) => setChecklistTemplates((current) => current.map((row) => row.id === item.id ? { ...row, description: event.target.value } : row))} /></td>
+                          <td><Form.Check checked={!!item.is_required} onChange={(event) => setChecklistTemplates((current) => current.map((row) => row.id === item.id ? { ...row, is_required: event.target.checked } : row))} /></td>
+                          <td><Form.Check checked={!!item.requires_photo} onChange={(event) => setChecklistTemplates((current) => current.map((row) => row.id === item.id ? { ...row, requires_photo: event.target.checked } : row))} /></td>
+                          <td><Form.Check checked={!!item.requires_note} onChange={(event) => setChecklistTemplates((current) => current.map((row) => row.id === item.id ? { ...row, requires_note: event.target.checked } : row))} /></td>
+                          <td><Form.Check checked={!!item.is_active} onChange={(event) => setChecklistTemplates((current) => current.map((row) => row.id === item.id ? { ...row, is_active: event.target.checked } : row))} /></td>
+                          <td className="text-end"><Button size="sm" variant="outline-primary" onClick={() => updateChecklistTemplate(item)} className="me-2">Salvar</Button><Button size="sm" variant="outline-danger" onClick={() => removeChecklistTemplate(item)}>Excluir</Button></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </Table>
+                  <div className="border rounded p-3 bg-light">
+                    <div className="fw-semibold mb-2">Novo item</div>
+                    <Row className="g-2 align-items-end">
+                      <Col md={6}><Form.Label>Descrição</Form.Label><Form.Control value={newChecklistItem.description} onChange={(event) => setNewChecklistItem({ ...newChecklistItem, description: event.target.value })} /></Col>
+                      <Col md={2}><Form.Label>Ordem</Form.Label><IntegerInput value={newChecklistItem.sort_order} onChange={(event) => setNewChecklistItem({ ...newChecklistItem, sort_order: event.target.value })} /></Col>
+                      <Col md={4} className="d-flex gap-3 flex-wrap">
+                        <Form.Check label="Obrigatório" checked={!!newChecklistItem.is_required} onChange={(event) => setNewChecklistItem({ ...newChecklistItem, is_required: event.target.checked })} />
+                        <Form.Check label="Foto" checked={!!newChecklistItem.requires_photo} onChange={(event) => setNewChecklistItem({ ...newChecklistItem, requires_photo: event.target.checked })} />
+                        <Form.Check label="Obs." checked={!!newChecklistItem.requires_note} onChange={(event) => setNewChecklistItem({ ...newChecklistItem, requires_note: event.target.checked })} />
+                      </Col>
+                    </Row>
+                    <Button type="button" variant="outline-success" className="mt-3" onClick={addChecklistTemplate}>Adicionar item</Button>
+                  </div>
+                </> : null}
+              </Card.Body>
+            </Card>
+          </TabPanel>
+
+          <TabPanel activeKey={activeTab} eventKey="details">
+            <Card className="form-section-card">
+              <Card.Body>
+                <div className="form-section-title">Descrição e status</div>
+                <Form.Group className="mb-3">
+                  <Form.Label>Descrição</Form.Label>
+                  <Form.Control as="textarea" rows={4} value={form.description} onChange={(event) => update({ description: event.target.value })}/>
+                </Form.Group>
+                <Form.Check className="mb-2" label="Mostrar como mais usado/preferido na seleção da OS" checked={!!form.is_featured} onChange={(event) => update({ is_featured: event.target.checked })}/>
+                <Form.Check label="Ativo" checked={form.is_active} onChange={(event) => update({ is_active: event.target.checked })}/>
+              </Card.Body>
+            </Card>
+          </TabPanel>
+        </Modal.Body>
+        <TabbedFormFooter tabs={tabs} activeKey={activeTab} onSelect={setActiveTab} onCancel={() => setShow(false)} saveLabel="Salvar" />
+      </Form>
+    </Modal>
+  </>;
+}

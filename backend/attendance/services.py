@@ -1,0 +1,689 @@
+from decimal import Decimal
+
+from django.conf import settings
+from django.core.exceptions import ValidationError
+from django.core.mail import send_mail
+from django.db import transaction
+from django.utils import timezone
+
+from accounts.url_utils import get_frontend_base_url
+
+from finance.models import AccountReceivable
+from messaging.models import MessageLog, MessageTemplate
+from messaging.services import create_and_send
+from workshop.models import PartStockMovement, WorkOrder, WorkOrderMessage, WorkOrderNotificationRule, WorkOrderPart, WorkOrderService, WorkshopProfile
+from workshop.services import record_event, reserve_parts_for_work_order
+from workshop.models import WorkOrderEvent
+
+from .models import CounterSale, CounterSalePayment, Estimate, EstimateCustomerApproval
+
+ZERO = Decimal("0.00")
+
+
+def _actor_or_none(actor):
+    return actor if getattr(actor, "is_authenticated", False) else None
+
+
+@transaction.atomic
+def ensure_receivable_for_counter_sale(counter_sale, actor=None):
+    sale = CounterSale.objects.select_for_update(of=("self",)).select_related("customer").prefetch_related("payments", "items").get(pk=counter_sale.pk)
+    if sale.status != CounterSale.Status.FINALIZED:
+        raise ValidationError("A conta a receber só pode ser gerada para venda avulsa finalizada.")
+    sale.recalculate_totals(save=True)
+    receivable, created = AccountReceivable.objects.select_for_update(of=("self",)).get_or_create(
+        counter_sale=sale,
+        defaults={
+            "origin": AccountReceivable.Origin.COUNTER_SALE,
+            "customer": sale.customer,
+            "description": f"Conta a receber da venda avulsa {sale.number}",
+            "issue_date": timezone.localdate(),
+            "due_date": sale.due_date or timezone.localdate(),
+            "amount": sale.total_amount or ZERO,
+            "discount_amount": sale.discount_amount or ZERO,
+            "paid_amount": sale.paid_amount or ZERO,
+            "created_by": _actor_or_none(actor),
+            "updated_by": _actor_or_none(actor),
+        },
+    )
+    receivable.origin = AccountReceivable.Origin.COUNTER_SALE
+    receivable.customer = sale.customer
+    receivable.description = f"Conta a receber da venda avulsa {sale.number}"
+    receivable.due_date = sale.due_date or timezone.localdate()
+    receivable.updated_by = _actor_or_none(actor) or receivable.updated_by
+    receivable.recalculate(save=True)
+    return receivable, created
+
+
+@transaction.atomic
+def register_counter_sale_payment(counter_sale, amount, method, paid_at=None, reference="", notes="", actor=None):
+    sale = CounterSale.objects.select_for_update(of=("self",)).get(pk=counter_sale.pk)
+    if sale.status == CounterSale.Status.CANCELLED:
+        raise ValidationError("Venda cancelada não pode receber pagamento.")
+    sale.recalculate_totals(save=True)
+    amount = Decimal(str(amount))
+    if amount <= ZERO:
+        raise ValidationError("O valor recebido precisa ser maior que zero.")
+    if amount > sale.balance_amount:
+        raise ValidationError("O valor recebido não pode ser maior que o saldo da venda.")
+    payment = CounterSalePayment.objects.create(
+        counter_sale=sale,
+        method=method,
+        amount=amount,
+        paid_at=paid_at or timezone.now(),
+        reference=reference,
+        notes=notes,
+        created_by=_actor_or_none(actor),
+    )
+    sale.refresh_from_db()
+    sale.recalculate_totals(save=True)
+    if sale.status == CounterSale.Status.FINALIZED:
+        ensure_receivable_for_counter_sale(sale, actor=actor)
+    return payment, sale
+
+
+@transaction.atomic
+def finalize_counter_sale(counter_sale, actor=None, payment_amount=None, payment_method=None, payment_reference="", payment_notes=""):
+    sale = CounterSale.objects.select_for_update(of=("self",)).prefetch_related("items__part").get(pk=counter_sale.pk)
+    if sale.status != CounterSale.Status.DRAFT:
+        raise ValidationError("Somente venda em rascunho pode ser finalizada.")
+    items = list(sale.items.select_related("part"))
+    if not items:
+        raise ValidationError("Inclua pelo menos uma peça na venda avulsa.")
+    sale.recalculate_totals(save=True)
+    if sale.total_amount <= ZERO:
+        raise ValidationError("Venda avulsa precisa ter valor final maior que zero.")
+
+    for item in items:
+        if not item.part_id:
+            continue
+        part = item.part
+        if part.stock_quantity < item.quantity:
+            raise ValidationError(f"Estoque insuficiente para {part.name}. Disponível: {part.stock_quantity}; solicitado: {item.quantity}.")
+        part.stock_quantity = (part.stock_quantity or ZERO) - (item.quantity or ZERO)
+        part.save(update_fields=["stock_quantity", "updated_at"])
+        movement = PartStockMovement.objects.create(
+            part=part,
+            movement_type=PartStockMovement.MovementType.CONSUMPTION,
+            quantity=-(item.quantity or ZERO),
+            unit_cost=item.cost_price or part.cost_price or ZERO,
+            notes=f"Baixa por venda avulsa {sale.number}",
+            actor=_actor_or_none(actor),
+        )
+        item.stock_movement = movement
+        item.save(update_fields=["stock_movement", "updated_at"])
+
+    sale.status = CounterSale.Status.FINALIZED
+    sale.sold_at = timezone.now()
+    sale.updated_by = _actor_or_none(actor) or sale.updated_by
+    sale.save(update_fields=["status", "sold_at", "updated_by", "updated_at"])
+
+    if payment_amount and Decimal(str(payment_amount)) > ZERO:
+        register_counter_sale_payment(
+            sale,
+            amount=payment_amount,
+            method=payment_method or CounterSalePayment.Method.CASH,
+            reference=payment_reference,
+            notes=payment_notes,
+            actor=actor,
+        )
+    sale.refresh_from_db()
+    sale.recalculate_totals(save=True)
+    ensure_receivable_for_counter_sale(sale, actor=actor)
+    return sale
+
+
+@transaction.atomic
+def cancel_counter_sale(counter_sale, actor=None, reason=""):
+    sale = CounterSale.objects.select_for_update(of=("self",)).prefetch_related("items__part", "items__stock_movement").get(pk=counter_sale.pk)
+    if sale.status == CounterSale.Status.CANCELLED:
+        return sale
+    if sale.payments.exists():
+        raise ValidationError("Venda com pagamento registrado não pode ser cancelada por segurança. Estorne o recebimento antes.")
+    if sale.status == CounterSale.Status.FINALIZED:
+        for item in sale.items.select_related("part", "stock_movement"):
+            if item.part_id and item.stock_movement_id:
+                part = item.part
+                part.stock_quantity = (part.stock_quantity or ZERO) + (item.quantity or ZERO)
+                part.save(update_fields=["stock_quantity", "updated_at"])
+                PartStockMovement.objects.create(
+                    part=part,
+                    movement_type=PartStockMovement.MovementType.REVERSAL,
+                    quantity=item.quantity or ZERO,
+                    unit_cost=item.cost_price or part.cost_price or ZERO,
+                    notes=f"Estorno da venda avulsa {sale.number}. {reason}".strip(),
+                    actor=_actor_or_none(actor),
+                )
+    sale.status = CounterSale.Status.CANCELLED
+    sale.notes = (sale.notes + "\n" if sale.notes else "") + (reason or "Venda avulsa cancelada.")
+    sale.updated_by = _actor_or_none(actor) or sale.updated_by
+    sale.save(update_fields=["status", "notes", "updated_by", "updated_at"])
+    receivable = getattr(sale, "account_receivable", None)
+    if receivable:
+        receivable.status = AccountReceivable.Status.CANCELLED
+        receivable.updated_by = _actor_or_none(actor) or receivable.updated_by
+        receivable.save(update_fields=["status", "updated_by", "updated_at"])
+    return sale
+
+
+@transaction.atomic
+def change_estimate_status(estimate, status, actor=None, note="", send_notifications=True):
+    obj = Estimate.objects.select_for_update(of=("self",)).get(pk=estimate.pk)
+    if obj.status == Estimate.Status.CONVERTED:
+        raise ValidationError("Orçamento convertido em OS não pode trocar status.")
+    old_status = obj.status
+    valid_transitions = {
+        Estimate.Status.OPEN: {Estimate.Status.DIAGNOSIS, Estimate.Status.AWAITING_APPROVAL, Estimate.Status.CANCELLED},
+        Estimate.Status.DIAGNOSIS: {Estimate.Status.AWAITING_APPROVAL, Estimate.Status.OPEN, Estimate.Status.CANCELLED},
+        Estimate.Status.AWAITING_APPROVAL: {Estimate.Status.DIAGNOSIS, Estimate.Status.APPROVED, Estimate.Status.PARTIALLY_APPROVED, Estimate.Status.REJECTED, Estimate.Status.EXPIRED, Estimate.Status.CANCELLED},
+        Estimate.Status.APPROVED: {Estimate.Status.CONVERTED},
+        Estimate.Status.PARTIALLY_APPROVED: {Estimate.Status.CONVERTED},
+        Estimate.Status.REJECTED: set(),
+        Estimate.Status.EXPIRED: {Estimate.Status.DIAGNOSIS, Estimate.Status.CANCELLED},
+        Estimate.Status.CANCELLED: set(),
+    }
+    if status != obj.status and status not in valid_transitions.get(obj.status, set()):
+        raise ValidationError(f"Transição de orçamento não permitida: {obj.status_label} → {dict(Estimate.Status.choices).get(status, status)}.")
+    now = timezone.now()
+    obj.status = status
+    if status == Estimate.Status.AWAITING_APPROVAL and not obj.sent_at:
+        obj.sent_at = now
+    if status in {Estimate.Status.APPROVED, Estimate.Status.PARTIALLY_APPROVED} and not obj.approved_at:
+        obj.approved_at = now
+    if status == Estimate.Status.REJECTED and not obj.rejected_at:
+        obj.rejected_at = now
+    if note:
+        obj.internal_notes = (obj.internal_notes + "\n" if obj.internal_notes else "") + note
+    obj.updated_by = _actor_or_none(actor) or obj.updated_by
+    obj.save(update_fields=["status", "sent_at", "approved_at", "rejected_at", "internal_notes", "updated_by", "updated_at"])
+    if send_notifications and old_status != obj.status:
+        transaction.on_commit(lambda: trigger_estimate_status_notifications(Estimate.objects.select_related("customer", "vehicle").get(pk=obj.pk), actor=actor))
+    return obj
+
+
+def build_estimate_approval_url(approval):
+    base_url = get_frontend_base_url().rstrip("/")
+    return f"{base_url}{approval.public_url_path}"
+
+
+def send_estimate_approval_email(approval, public_url):
+    estimate = approval.estimate
+    customer = estimate.customer
+    recipient = (approval.customer_email_snapshot or getattr(customer, "email", "") or "").strip()
+    customer_name = approval.customer_name_snapshot or customer.full_name or "cliente"
+    vehicle_display = estimate.vehicle.display_name if estimate.vehicle_id else "veículo não informado"
+    subject = f"Aprovação digital - Orçamento {estimate.number}"
+    message = (
+        f"Olá {customer_name},\n\n"
+        "A oficina gerou um orçamento para sua análise e aprovação digital.\n\n"
+        f"Orçamento: {estimate.number}\n"
+        f"Veículo: {vehicle_display}\n"
+        f"Total: R$ {estimate.total_amount:.2f}\n"
+        f"Validade: {approval.expires_at.strftime('%d/%m/%Y %H:%M') if approval.expires_at else 'sem validade definida'}\n\n"
+        "No link abaixo você pode aprovar todos os serviços e peças ou escolher apenas os itens que deseja autorizar.\n"
+        f"{public_url}\n\n"
+        "Caso você não tenha solicitado este atendimento, ignore esta mensagem.\n"
+    )
+    if not recipient:
+        return {
+            "email_sent": False,
+            "email_to": "",
+            "email_backend": settings.EMAIL_BACKEND,
+            "email_error": "Cliente sem e-mail cadastrado. O link foi gerado, mas não foi enviado.",
+        }
+    sent_count = send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [recipient], fail_silently=False)
+    return {"email_sent": bool(sent_count), "email_to": recipient, "email_backend": settings.EMAIL_BACKEND, "email_error": ""}
+
+
+@transaction.atomic
+def ensure_pending_estimate_approval(estimate, actor=None, expires_days=7):
+    obj = Estimate.objects.select_for_update(of=("self",)).select_related("customer", "vehicle").prefetch_related("services", "parts").get(pk=estimate.pk)
+    if obj.status not in {Estimate.Status.OPEN, Estimate.Status.DIAGNOSIS, Estimate.Status.AWAITING_APPROVAL}:
+        raise ValidationError("Somente orçamento aberto, em diagnóstico ou aguardando aprovação pode gerar link de aprovação.")
+    if not obj.services.exists():
+        raise ValidationError("Inclua pelo menos um serviço no orçamento antes de enviar para aprovação.")
+    obj.recalculate_totals(save=True)
+    if obj.total_amount <= ZERO:
+        raise ValidationError("Orçamento precisa ter valor maior que zero para aprovação digital.")
+    approval = (
+        EstimateCustomerApproval.objects
+        .filter(estimate=obj, status=EstimateCustomerApproval.Status.PENDING, is_active=True)
+        .order_by("-requested_at", "-id")
+        .first()
+    )
+    if not approval:
+        approval = EstimateCustomerApproval.objects.create(
+            estimate=obj,
+            requested_by=_actor_or_none(actor),
+            expires_at=timezone.now() + timezone.timedelta(days=expires_days),
+        )
+    status_changed = obj.status != Estimate.Status.AWAITING_APPROVAL
+    if status_changed:
+        obj.status = Estimate.Status.AWAITING_APPROVAL
+        obj.sent_at = obj.sent_at or timezone.now()
+        obj.updated_by = _actor_or_none(actor) or obj.updated_by
+        obj.save(update_fields=["status", "sent_at", "updated_by", "updated_at"])
+        transaction.on_commit(lambda: trigger_estimate_status_notifications(Estimate.objects.select_related("customer", "vehicle").get(pk=obj.pk), actor=actor))
+    return approval
+
+
+def estimate_notification_context(estimate, actor=None, approval=None, work_order=None):
+    profile = WorkshopProfile.get_solo()
+    vehicle_display = estimate.vehicle.display_name if estimate.vehicle_id else ""
+    customer = estimate.customer
+    base = _estimate_extra_context(estimate, approval=approval, work_order=work_order)
+    base.update(
+        {
+            "numero_orcamento": estimate.number,
+            "status_orcamento": estimate.status_label,
+            "total_orcamento": f"{estimate.total_amount:.2f}",
+            "titulo_orcamento": estimate.title,
+            "diagnostico_orcamento": estimate.diagnosis,
+            "nome_cliente": customer.full_name,
+            "email_cliente": customer.email,
+            "telefone_cliente": customer.phone_e164,
+            "veiculo_descricao": vehicle_display,
+            "placa_veiculo": estimate.vehicle.plate if estimate.vehicle_id else "",
+            "modelo_veiculo": estimate.vehicle.model if estimate.vehicle_id else "",
+            "nome_oficina": profile.display_name,
+            "email_oficina": profile.email,
+            "telefone_oficina": profile.phone_e164,
+            "oficina": {
+                "nome": profile.display_name,
+                "email": profile.email,
+                "telefone": profile.phone_e164,
+                "endereco": profile.address_display,
+            },
+            "customer": base.get("cliente", {}),
+            "vehicle": base.get("veiculo", {}),
+            "usuario_logado": {
+                "full_name": actor.get_full_name() if getattr(actor, "is_authenticated", False) else "",
+                "username": getattr(actor, "username", ""),
+                "email": getattr(actor, "email", ""),
+            },
+        }
+    )
+    return base
+
+
+def _estimate_notification_targets(rule):
+    target = getattr(rule, "recipient_target", WorkOrderNotificationRule.RecipientTarget.CUSTOMER) if rule else WorkOrderNotificationRule.RecipientTarget.CUSTOMER
+    if target == WorkOrderNotificationRule.RecipientTarget.BOTH:
+        return [WorkOrderNotificationRule.RecipientTarget.CUSTOMER, WorkOrderNotificationRule.RecipientTarget.WORKSHOP]
+    return [target]
+
+
+def _recipient_kwargs_for_estimate(estimate, template, target):
+    if target == WorkOrderNotificationRule.RecipientTarget.WORKSHOP:
+        profile = WorkshopProfile.get_solo()
+        if template.channel == MessageTemplate.Channel.EMAIL:
+            if not profile.email:
+                raise ValidationError({"oficina": "Oficina sem e-mail cadastrado no admin."})
+            return {"contact": None, "raw_email": profile.email, "raw_phone": ""}
+        if not profile.phone_e164:
+            raise ValidationError({"oficina": "Oficina sem WhatsApp cadastrado no admin."})
+        return {"contact": None, "raw_email": "", "raw_phone": profile.phone_e164}
+
+    if template.channel == MessageTemplate.Channel.EMAIL:
+        if not estimate.customer.email:
+            raise ValidationError({"cliente": "Cliente sem email cadastrado."})
+        return {"contact": estimate.customer, "raw_email": "", "raw_phone": ""}
+    if not estimate.customer.phone_e164:
+        raise ValidationError({"cliente": "Cliente sem WhatsApp em formato E.164."})
+    return {"contact": estimate.customer, "raw_email": "", "raw_phone": ""}
+
+
+def _create_failed_estimate_message(estimate, rule, actor, error_message):
+    return WorkOrderMessage.objects.create(
+        estimate=estimate,
+        trigger_type=WorkOrderMessage.TriggerType.STATUS_AUTO,
+        trigger_status=estimate.status,
+        channel=getattr(rule, "channel", "") or getattr(getattr(rule, "template", None), "channel", ""),
+        recipient_target=getattr(rule, "recipient_target", "") or "",
+        template=getattr(rule, "template", None),
+        notification_rule=rule,
+        status=MessageLog.Status.FAILED,
+        error_message=str(error_message),
+        created_by=_actor_or_none(actor),
+    )
+
+
+def send_estimate_message(estimate, template, actor=None, notification_rule=None, recipient_target=None):
+    targets = [recipient_target] if recipient_target else _estimate_notification_targets(notification_rule)
+    created_relations = []
+    for target in targets:
+        kwargs = _recipient_kwargs_for_estimate(estimate, template, target)
+        log = create_and_send(
+            template=template,
+            actor=actor,
+            extra=estimate_notification_context(estimate, actor=actor),
+            send_now=True,
+            **kwargs,
+        )
+        relation = WorkOrderMessage.objects.create(
+            estimate=estimate,
+            trigger_type=WorkOrderMessage.TriggerType.STATUS_AUTO,
+            trigger_status=estimate.status,
+            channel=template.channel,
+            recipient_target=target or "",
+            template=template,
+            notification_rule=notification_rule,
+            message_log=log,
+            status=log.status,
+            error_message=log.error_message,
+            created_by=_actor_or_none(actor),
+        )
+        created_relations.append(relation)
+    return created_relations[0] if len(created_relations) == 1 else created_relations
+
+
+def trigger_estimate_status_notifications(estimate, actor=None, status_value=None):
+    sent = []
+    original_status = estimate.status
+    if status_value:
+        estimate.status = status_value
+    rules = list(
+        WorkOrderNotificationRule.objects.select_related("template").filter(
+            is_active=True,
+            entity_type=WorkOrderNotificationRule.EntityType.ESTIMATE,
+            trigger_status=estimate.status,
+        )
+    )
+    for rule in rules:
+        template = getattr(rule, "template", None)
+        if not template:
+            sent.append(_create_failed_estimate_message(estimate, rule, actor, "Template removido ou não encontrado.").id)
+            continue
+        if not template.is_active:
+            sent.append(_create_failed_estimate_message(estimate, rule, actor, "Template inativo.").id)
+            continue
+        if rule.send_once_per_status:
+            already_sent = WorkOrderMessage.objects.filter(
+                estimate=estimate,
+                notification_rule=rule,
+                trigger_status=estimate.status,
+                message_log__status=MessageLog.Status.SENT,
+            ).exists()
+            if already_sent:
+                continue
+        try:
+            relation = send_estimate_message(estimate, template, actor=actor, notification_rule=rule)
+            relations = relation if isinstance(relation, list) else [relation]
+            sent.extend(item.id for item in relations)
+        except Exception as exc:
+            sent.append(_create_failed_estimate_message(estimate, rule, actor, exc).id)
+    estimate.status = original_status
+    return sent
+
+
+def _estimate_extra_context(estimate, approval=None, work_order=None):
+    return {
+        "orcamento": {
+            "id": estimate.id,
+            "numero": estimate.number,
+            "titulo": estimate.title,
+            "status": estimate.status,
+            "status_label": estimate.status_label,
+            "total": estimate.total_amount,
+            "aprovado_em": estimate.approved_at,
+        },
+        "estimate": {
+            "id": estimate.id,
+            "number": estimate.number,
+            "title": estimate.title,
+            "status": estimate.status,
+            "status_label": estimate.status_label,
+            "total_amount": estimate.total_amount,
+            "approved_at": estimate.approved_at,
+        },
+        "cliente": {
+            "nome": estimate.customer.full_name,
+            "email": estimate.customer.email,
+            "telefone": estimate.customer.phone_e164,
+        },
+        "veiculo": {
+            "descricao": estimate.vehicle.display_name if estimate.vehicle_id else "",
+        },
+        "aprovacao": {
+            "status": getattr(approval, "status", ""),
+            "status_label": getattr(approval, "status_label", ""),
+            "nome": getattr(approval, "decision_name", ""),
+            "observacoes": getattr(approval, "decision_notes", ""),
+        },
+        "os": {
+            "id": getattr(work_order, "id", ""),
+            "numero": getattr(work_order, "number", ""),
+            "status": getattr(work_order, "status", ""),
+            "status_label": getattr(work_order, "status_label", ""),
+        },
+    }
+
+
+def send_estimate_approval_whatsapp_to_workshop(estimate, approval, work_order=None, actor=None):
+    profile = WorkshopProfile.get_solo()
+    if not profile.phone_e164:
+        return None
+    template, _ = MessageTemplate.objects.get_or_create(
+        slug="orcamento-aprovado-oficina-whatsapp",
+        defaults={
+            "name": "Orçamento aprovado - aviso para oficina",
+            "channel": MessageTemplate.Channel.WHATSAPP,
+            "description": "Aviso interno para a oficina quando cliente aprova total ou parcialmente um orçamento.",
+            "whatsapp_body": (
+                "✅ Orçamento {{ estimate.number }} aprovado por {{ aprovacao.nome }}.\n"
+                "Status: {{ aprovacao.status_label }}\n"
+                "Cliente: {{ cliente.nome }}\n"
+                "Veículo: {{ veiculo.descricao }}\n"
+                "Total aprovado registrado na OS {{ os.numero }}.\n"
+                "Observações: {{ aprovacao.observacoes }}"
+            ),
+            "is_active": True,
+        },
+    )
+    if template.channel != MessageTemplate.Channel.WHATSAPP:
+        raise ValidationError("O template interno orcamento-aprovado-oficina-whatsapp precisa ser do canal WhatsApp.")
+    return create_and_send(
+        template=template,
+        actor=actor,
+        raw_phone=profile.phone_e164,
+        extra=_estimate_extra_context(estimate, approval=approval, work_order=work_order),
+        send_now=True,
+    )
+
+
+@transaction.atomic
+def convert_estimate_to_work_order(estimate, actor=None, selected_service_ids=None, selected_part_ids=None, approval=None):
+    obj = Estimate.objects.select_for_update(of=("self",)).select_related("customer", "vehicle").prefetch_related("services", "parts").get(pk=estimate.pk)
+    if obj.status not in {Estimate.Status.APPROVED, Estimate.Status.PARTIALLY_APPROVED, Estimate.Status.AWAITING_APPROVAL}:
+        raise ValidationError("Somente orçamento aguardando aprovação, aprovado ou aprovado parcialmente pode ser convertido em OS.")
+    if obj.converted_work_order_id:
+        return obj.converted_work_order
+
+    services = list(obj.services.select_related("service", "source_package"))
+    parts = list(obj.parts.select_related("part", "service_item"))
+    if selected_service_ids is None:
+        selected_service_ids = [item.id for item in services]
+    if selected_part_ids is None:
+        selected_part_ids = [item.id for item in parts]
+    selected_service_ids = {int(item_id) for item_id in selected_service_ids}
+    selected_part_ids = {int(item_id) for item_id in selected_part_ids}
+    selected_services = [item for item in services if item.id in selected_service_ids]
+    if not selected_services:
+        raise ValidationError("A aprovação precisa conter pelo menos um serviço para gerar OS.")
+    selected_service_id_set = {item.id for item in selected_services}
+    selected_parts = [
+        item for item in parts
+        if item.id in selected_part_ids and (not item.service_item_id or item.service_item_id in selected_service_id_set)
+    ]
+
+    obj.recalculate_totals(save=True)
+    work_order = WorkOrder.objects.create(
+        customer=obj.customer,
+        vehicle=obj.vehicle,
+        title=obj.title,
+        complaint=obj.complaint,
+        diagnosis=obj.diagnosis,
+        customer_notes=obj.customer_notes,
+        internal_notes=f"OS aberta automaticamente a partir do orçamento {obj.number}.\n{obj.internal_notes}".strip(),
+        status=WorkOrder.Status.OPEN,
+        promised_at=None,
+        manual_discount_amount=obj.discount_amount or ZERO,
+        source_estimate_id=obj.id,
+        source_estimate_number=obj.number,
+        created_by=_actor_or_none(actor),
+        updated_by=_actor_or_none(actor),
+    )
+    service_map = {}
+    for item in selected_services:
+        line = WorkOrderService.objects.create(
+            work_order=work_order,
+            service=item.service,
+            source_package=item.source_package,
+            description=item.description,
+            quantity=item.quantity,
+            unit_price=item.unit_price,
+            discount_amount=item.discount_amount,
+            notes=item.notes,
+            status=WorkOrderService.Status.PENDING,
+        )
+        service_map[item.id] = line
+    for item in selected_parts:
+        WorkOrderPart.objects.create(
+            work_order=work_order,
+            linked_service=service_map.get(item.service_item_id),
+            part=item.part,
+            description=item.description,
+            quantity=item.quantity,
+            unit_price=item.unit_price,
+            cost_price=item.cost_price,
+            discount_amount=item.discount_amount,
+            notes=item.notes,
+        )
+    work_order.recalculate_totals(save=True)
+    reservation_summary = reserve_parts_for_work_order(work_order, actor=actor, source_estimate=obj)
+    from purchasing.services import ensure_purchases_for_work_order_shortages
+    purchase_summary = ensure_purchases_for_work_order_shortages(work_order, actor=actor)
+    work_order.refresh_from_db()
+    record_event(
+        work_order,
+        WorkOrderEvent.EventType.CREATED,
+        actor=actor,
+        description=f"OS aberta a partir do orçamento {obj.number} com itens aprovados pelo cliente.",
+        new_status=work_order.status,
+        data={
+            "estimate_id": obj.id,
+            "estimate_number": obj.number,
+            "approved_service_ids": sorted(selected_service_ids),
+            "approved_part_ids": sorted(selected_part_ids),
+            "approval_id": getattr(approval, "id", None),
+            "reservation_summary": reservation_summary,
+            "purchase_summary": purchase_summary,
+        },
+    )
+    obj.status = Estimate.Status.CONVERTED
+    obj.converted_work_order = work_order
+    obj.converted_at = timezone.now()
+    obj.updated_by = _actor_or_none(actor) or obj.updated_by
+    obj.save(update_fields=["status", "converted_work_order", "converted_at", "updated_by", "updated_at"])
+    transaction.on_commit(lambda: trigger_estimate_status_notifications(Estimate.objects.select_related("customer", "vehicle").get(pk=obj.pk), actor=actor))
+    if approval:
+        approval.generated_work_order = work_order
+        approval.save(update_fields=["generated_work_order", "updated_at"])
+    return work_order
+
+
+@transaction.atomic
+def decide_estimate_approval(approval, decision, selected_service_ids, selected_part_ids, name="", document="", notes="", confirm_partial=False, ip_address=None, user_agent="", actor=None):
+    obj = EstimateCustomerApproval.objects.select_for_update(of=("self",)).select_related("estimate__customer", "estimate__vehicle").get(pk=approval.pk)
+    if not obj.can_decide:
+        raise ValidationError({"status": "Este link não está mais disponível para decisão."})
+    estimate = Estimate.objects.select_for_update(of=("self",)).prefetch_related("services", "parts").get(pk=obj.estimate_id)
+    document = (document or "").strip()
+    digits = "".join(ch for ch in document if ch.isdigit())
+    if len(digits) not in (11, 14):
+        raise ValidationError({"document": "Informe um CPF com 11 dígitos ou CNPJ com 14 dígitos."})
+    if not (notes or "").strip():
+        raise ValidationError({"notes": "Informe uma observação para registrar a decisão."})
+    if decision == EstimateCustomerApproval.Status.REJECTED:
+        obj.status = EstimateCustomerApproval.Status.REJECTED
+        estimate.status = Estimate.Status.REJECTED
+        estimate.rejected_at = timezone.now()
+        work_order = None
+    elif decision in {EstimateCustomerApproval.Status.APPROVED, "approved"}:
+        services = list(estimate.services.all())
+        parts = list(estimate.parts.all())
+        all_service_ids = {item.id for item in services}
+        all_part_ids = {item.id for item in parts}
+        selected_service_ids = {int(item_id) for item_id in selected_service_ids}
+        selected_part_ids = {int(item_id) for item_id in selected_part_ids}
+        invalid_services = selected_service_ids - all_service_ids
+        invalid_parts = selected_part_ids - all_part_ids
+        if invalid_services or invalid_parts:
+            raise ValidationError("A seleção contém itens que não pertencem a este orçamento.")
+        if not selected_service_ids:
+            raise ValidationError({"selected_service_ids": "Selecione pelo menos um serviço para aprovar o orçamento."})
+        linked_parts = {item.id for item in parts if item.service_item_id and item.service_item_id in selected_service_ids}
+        orphan_parts = {item.id for item in parts if not item.service_item_id}
+        valid_part_ids = linked_parts | orphan_parts
+        selected_part_ids = selected_part_ids & valid_part_ids
+        is_partial = selected_service_ids != all_service_ids or selected_part_ids != all_part_ids
+        if is_partial and not confirm_partial:
+            raise ValidationError({"confirm_partial": "Você desmarcou um ou mais itens. Confirme que deseja aprovar parcialmente este orçamento."})
+        obj.status = EstimateCustomerApproval.Status.PARTIALLY_APPROVED if is_partial else EstimateCustomerApproval.Status.APPROVED
+        estimate.status = Estimate.Status.PARTIALLY_APPROVED if is_partial else Estimate.Status.APPROVED
+        estimate.approved_at = timezone.now()
+        now = timezone.now()
+        estimate.services.update(approved_by_customer=False, customer_decided_at=now)
+        estimate.parts.update(approved_by_customer=False, customer_decided_at=now)
+        estimate.services.filter(id__in=selected_service_ids).update(approved_by_customer=True, customer_decided_at=now)
+        estimate.parts.filter(id__in=selected_part_ids).update(approved_by_customer=True, customer_decided_at=now)
+        estimate.save(update_fields=["status", "approved_at", "updated_at"])
+        obj.decision_selected_services = sorted(selected_service_ids)
+        obj.decision_selected_parts = sorted(selected_part_ids)
+        obj.decision_name = (name or "").strip()[:180]
+        obj.decision_document = document[:30]
+        obj.decision_notes = notes
+        obj.decision_ip = ip_address
+        obj.decision_user_agent = (user_agent or "")[:2000]
+        obj.decided_at = timezone.now()
+        obj.save(update_fields=["status", "decision_selected_services", "decision_selected_parts", "decision_name", "decision_document", "decision_notes", "decision_ip", "decision_user_agent", "decided_at", "updated_at"])
+        approved_status_for_notifications = estimate.status
+        transaction.on_commit(
+            lambda: trigger_estimate_status_notifications(
+                Estimate.objects.select_related("customer", "vehicle").get(pk=estimate.pk),
+                actor=actor,
+                status_value=approved_status_for_notifications,
+            )
+        )
+        work_order = convert_estimate_to_work_order(estimate, actor=actor, selected_service_ids=selected_service_ids, selected_part_ids=selected_part_ids, approval=obj)
+
+        def notify_workshop_after_commit():
+            try:
+                send_estimate_approval_whatsapp_to_workshop(
+                    Estimate.objects.get(pk=estimate.pk),
+                    EstimateCustomerApproval.objects.get(pk=obj.pk),
+                    work_order=work_order,
+                    actor=actor,
+                )
+            except Exception as exc:
+                record_event(
+                    work_order,
+                    WorkOrderEvent.EventType.ERROR,
+                    actor=actor,
+                    description=f"Falha ao enviar WhatsApp interno de aprovação do orçamento: {exc}",
+                    data={"estimate_id": estimate.id, "approval_id": obj.id, "error": str(exc)},
+                )
+
+        transaction.on_commit(notify_workshop_after_commit)
+        return obj, work_order
+    else:
+        raise ValidationError({"decision": "Decisão inválida."})
+
+    obj.decision_name = (name or "").strip()[:180]
+    obj.decision_document = document[:30]
+    obj.decision_notes = notes
+    obj.decision_ip = ip_address
+    obj.decision_user_agent = (user_agent or "")[:2000]
+    obj.decided_at = timezone.now()
+    obj.save(update_fields=["status", "decision_name", "decision_document", "decision_notes", "decision_ip", "decision_user_agent", "decided_at", "updated_at"])
+    estimate.save(update_fields=["status", "rejected_at", "updated_at"])
+    return obj, work_order
