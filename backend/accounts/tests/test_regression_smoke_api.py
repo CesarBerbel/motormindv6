@@ -125,3 +125,57 @@ class MainApiRegressionSmokeTests(APITestCase):
 
         self.assertEqual(response.status_code, 401)
         self.assertTrue(response.data.get("detail") or response.data.get("message"), response.data)
+
+    def test_attendant_permissions_are_limited_to_attendance_area(self):
+        from accounts.roles import ROLE_ATTENDANT
+        from accounts.services import apply_role_to_user
+
+        attendant = get_user_model().objects.create_user(
+            username="attendant-smoke",
+            email="attendant-smoke@example.com",
+            password="senha-forte-123",
+        )
+        apply_role_to_user(attendant, ROLE_ATTENDANT)
+        self.client.force_authenticate(attendant)
+
+        me = self.client.get("/api/me/")
+        self.assertEqual(me.status_code, 200, me.data)
+        self.assertEqual(me.data["role_value"], ROLE_ATTENDANT)
+        self.assertNotIn("*", me.data["permission_codes"])
+        self.assertIn("dashboard.attendance", me.data["permission_codes"])
+        self.assertNotIn("finance.view", me.data["permission_codes"])
+        self.assertNotIn("purchases.view", me.data["permission_codes"])
+        self.assertNotIn("settings.manage", me.data["permission_codes"])
+        self.assertNotIn("reports.view", me.data["permission_codes"])
+
+        forbidden_endpoints = [
+            "/api/finance/accounts-receivable/",
+            "/api/purchasing/purchase-orders/",
+            "/api/accounts/audit-logs/",
+            "/api/workshop/dashboards/financeiro/",
+            "/api/workshop/dashboards/estoque/",
+        ]
+        for endpoint in forbidden_endpoints:
+            with self.subTest(endpoint=endpoint):
+                response = self.client.get(endpoint)
+                self.assertEqual(response.status_code, 403, getattr(response, "data", response.content))
+
+    def test_superuser_flag_does_not_override_non_owner_profile_role(self):
+        from accounts.roles import ROLE_ATTENDANT
+        from accounts.services import apply_role_to_user
+
+        user = get_user_model().objects.create_superuser(
+            username="legacy-super-attendant",
+            email="legacy-super-attendant@example.com",
+            password="senha-forte-123",
+        )
+        user.profile.role = ROLE_ATTENDANT
+        user.profile.save(update_fields=["role", "updated_at"])
+        self.client.force_authenticate(user)
+
+        response = self.client.get("/api/me/")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["role_value"], ROLE_ATTENDANT)
+        self.assertNotIn("*", response.data["permission_codes"])
+        self.assertNotIn("finance.view", response.data["permission_codes"])

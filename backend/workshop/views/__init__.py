@@ -5,6 +5,7 @@ por qualquer integração existente.
 """
 
 from .catalog import (
+    CepLookupView,
     FipeLookupView,
     GeneralCategoryViewSet,
     PartBrandViewSet,
@@ -34,6 +35,7 @@ from .work_orders import (
 __all__ = [
     "CustomerApprovalPdfView",
     "CustomerApprovalPublicView",
+    "CepLookupView",
     "FipeLookupView",
     "GeneralCategoryViewSet",
     "PartBrandViewSet",

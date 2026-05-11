@@ -4,6 +4,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     CustomerApprovalPdfView,
     CustomerApprovalPublicView,
+    CepLookupView,
     FipeLookupView,
     GeneralCategoryViewSet,
     PartBrandViewSet,
@@ -56,6 +57,7 @@ urlpatterns = [
     path("customer-approvals/<uuid:token>/pdf/", CustomerApprovalPdfView.as_view(), name="workshop-customer-approval-pdf"),
     path("dashboard/", WorkshopDashboardView.as_view(), name="workshop-dashboard"),
     path("company-profile/", WorkshopProfileView.as_view(), name="workshop-company-profile"),
+    path("cep/", CepLookupView.as_view(), name="workshop-cep-lookup"),
     path("dashboards/<str:role>/", RoleDashboardView.as_view(), name="workshop-role-dashboard"),
     path("technical/dashboard/", TechnicalDashboardView.as_view(), name="workshop-technical-dashboard"),
     path("fipe/<str:resource>/", FipeLookupView.as_view(), name="workshop-fipe"),

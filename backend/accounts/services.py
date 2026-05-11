@@ -74,9 +74,12 @@ def apply_role_to_user(user, role, technician_specialty=""):
 def get_user_role(user):
     if not user or not user.is_authenticated:
         return None
+    profile_role = getattr(getattr(user, "profile", None), "role", None)
+    if profile_role:
+        return profile_role
     if user.is_superuser:
         return ROLE_OWNER
-    return getattr(getattr(user, "profile", None), "role", None)
+    return None
 
 
 def get_user_dashboard_path(user):

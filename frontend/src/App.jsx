@@ -143,9 +143,9 @@ export default function App() {
             <Route path="vehicles" element={<Guard permission="vehicles.view"><VehiclesPage /></Guard>} />
             <Route path="categories" element={<Guard permission="categories.view"><CategoriesPage /></Guard>} />
             <Route path="technical/workbench" element={<Guard permission={["technical.dashboard", "dashboard.technical"]}><TechnicalWorkbenchPage /></Guard>} />
-            <Route path="workshop-services" element={<Guard permission="services.view"><WorkshopServicesPage /></Guard>} />
-            <Route path="service-packages" element={<Guard permission="service_packages.view"><ServicePackagesPage /></Guard>} />
-            <Route path="parts" element={<Guard permission="parts.view"><PartsPage /></Guard>} />
+            <Route path="workshop-services" element={<Guard permission="services.manage"><WorkshopServicesPage /></Guard>} />
+            <Route path="service-packages" element={<Guard permission="service_packages.manage"><ServicePackagesPage /></Guard>} />
+            <Route path="parts" element={<Guard permission="parts.manage"><PartsPage /></Guard>} />
             <Route path="stock-movements" element={<Guard permission="stock.view"><StockMovementsPage /></Guard>} />
             <Route path="finance/dashboard" element={<Guard permission="finance.view"><FinanceDashboardPage /></Guard>} />
             <Route path="finance/accounts-receivable" element={<Guard permission="finance.view"><FinanceReceivablesPage /></Guard>} />

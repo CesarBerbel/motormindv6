@@ -53,8 +53,8 @@ class RoleDashboardView(APIView):
             "role": role,
             "counts": {},
             "recent_work_orders": WorkOrderListSerializer(WorkOrder.objects.select_related("customer", "vehicle", "assigned_to")[:10], many=True).data,
-            "low_stock_parts": PartSerializer(Part.objects.filter(stock_quantity__lte=F("minimum_stock"))[:10], many=True).data,
-            "recent_payments": WorkOrderPaymentSerializer(WorkOrderPayment.objects.select_related("work_order", "created_by")[:10], many=True).data,
+            "low_stock_parts": [],
+            "recent_payments": [],
         }
 
         if role in {"dono", "administrativo", "atendimento"}:
@@ -67,6 +67,7 @@ class RoleDashboardView(APIView):
             })
         if role in {"dono", "administrativo", "estoque"}:
             open_purchase_statuses = [PurchaseOrder.Status.DRAFT, PurchaseOrder.Status.REQUESTED, PurchaseOrder.Status.APPROVED, PurchaseOrder.Status.ORDERED, PurchaseOrder.Status.PARTIALLY_RECEIVED]
+            base["low_stock_parts"] = PartSerializer(Part.objects.filter(stock_quantity__lte=F("minimum_stock"))[:10], many=True).data
             base["counts"].update({
                 "parts": Part.objects.count(),
                 "low_stock_parts": Part.objects.filter(stock_quantity__lte=F("minimum_stock")).count(),
@@ -84,6 +85,7 @@ class RoleDashboardView(APIView):
                 "services_done": technician_qs.filter(status=WorkOrderService.Status.DONE).count(),
             })
         if role in {"dono", "administrativo", "financeiro"}:
+            base["recent_payments"] = WorkOrderPaymentSerializer(WorkOrderPayment.objects.select_related("work_order", "created_by")[:10], many=True).data
             paid_month = WorkOrderPayment.objects.filter(paid_at__date__gte=month_start).aggregate(total=Sum("amount"))["total"] or 0
             receivable_balance = AccountReceivable.objects.aggregate(total=Sum("balance_amount"))["total"] or 0
             payable_balance = AccountPayable.objects.aggregate(total=Sum("balance_amount"))["total"] or 0

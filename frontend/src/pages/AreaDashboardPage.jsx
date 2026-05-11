@@ -31,7 +31,7 @@ const areaActions = {
     ["/contacts", "Clientes", "Pesquisar e cadastrar clientes.", "contacts.view"],
   ],
   estoque: [
-    ["/parts", "Peças", "Cadastro, marcas, categorias e estoque.", "parts.view"],
+    ["/parts", "Peças", "Cadastro, marcas, categorias e estoque.", "parts.manage"],
     ["/stock-movements", "Movimentos", "Entradas, ajustes e rastreabilidade.", "stock.view"],
     ["/purchasing/purchase-orders", "Pedidos de compra", "Comprar e receber peças.", "purchases.view"],
     ["/purchasing/suppliers", "Fornecedores", "Base de fornecedores.", "suppliers.view"],
@@ -39,8 +39,8 @@ const areaActions = {
   tecnico: [
     ["/technical/workbench", "Bancada técnica", "Execução dos serviços atribuídos.", ["technical.dashboard", "dashboard.technical"]],
     ["/work-orders", "OS em andamento", "Consultar detalhes da ordem.", "work_orders.view"],
-    ["/workshop-services", "Serviços", "Catálogo técnico de serviços.", "services.view"],
-    ["/service-packages", "Pacotes", "Combos e pacotes técnicos.", "service_packages.view"],
+    ["/workshop-services", "Serviços", "Catálogo técnico de serviços.", "services.manage"],
+    ["/service-packages", "Pacotes", "Combos e pacotes técnicos.", "service_packages.manage"],
   ],
   financeiro: [
     ["/finance/accounts-receivable", "Contas a receber", "Recebimentos, baixas e vencimentos.", "finance.view"],

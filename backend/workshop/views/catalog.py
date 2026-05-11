@@ -75,6 +75,37 @@ class FipeLookupView(APIView):
             return self._get_json(f"{vehicle_type}/marcas/{brand_code}/modelos/{model_code}/anos/{year_code}")
         raise ValidationError({"resource": "Use brands, models, years ou detail."})
 
+
+class CepLookupView(APIView):
+    permission_classes = [HasViewPermission]
+    permission_code = ["contacts.manage", "suppliers.manage", "settings.manage", "users.manage"]
+
+    def get(self, request):
+        cep = request.query_params.get("cep", "")
+        digits = "".join(ch for ch in cep if ch.isdigit())
+        if len(digits) != 8:
+            raise ValidationError({"cep": "Informe um CEP com 8 dígitos."})
+        try:
+            response = requests.get(f"https://viacep.com.br/ws/{digits}/json/", timeout=8)
+            response.raise_for_status()
+            data = response.json()
+        except requests.RequestException as exc:
+            return Response({"detail": "Falha ao consultar o CEP na base ViaCEP.", "error": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+        except ValueError:
+            return Response({"detail": "Resposta inválida recebida da base ViaCEP."}, status=status.HTTP_502_BAD_GATEWAY)
+        if data.get("erro"):
+            raise ValidationError({"cep": "CEP não encontrado na base ViaCEP."})
+        formatted = data.get("cep") or f"{digits[:5]}-{digits[5:]}"
+        return Response({
+            "zip_code": formatted,
+            "address_line": data.get("logradouro") or "",
+            "district": data.get("bairro") or "",
+            "city": data.get("localidade") or "",
+            "state": data.get("uf") or "",
+            "country": "Brasil",
+        })
+
+
 class WorkshopServiceViewSet(viewsets.ModelViewSet):
     serializer_class = WorkshopServiceSerializer
     parser_classes = [JSONParser, MultiPartParser, FormParser]
