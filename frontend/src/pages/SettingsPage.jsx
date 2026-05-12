@@ -2,18 +2,18 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Button, Card, Col, Form, Row, Table } from "react-bootstrap";
 import api, { apiError } from "../api/client";
+import { lookupCep } from "../utils/cep";
 import PageHeader from "../components/PageHeader";
 import ErrorAlert from "../components/ErrorAlert";
 import NoticeBox from "../components/NoticeBox";
 import SystemToast from "../components/SystemToast";
-import CepLookupButton from "../components/CepLookupButton";
 import FormTabs, { TabPanel } from "../components/FormTabs";
 import PhoneInputBR from "../components/PhoneInputBR";
 import { AdminField, AdminFormGrid, AdminFormSection, DesignPreviewCard } from "../components/AdminForm";
 import { applyAdminTheme } from "../theme";
 import { useAuth } from "../auth/AuthContext";
 import { hasPermission } from "../auth/permissions";
-import { maskCep, maskCpfCnpj } from "../workshopOptions";
+import { maskCep, maskCpfCnpj, onlyDigits } from "../workshopOptions";
 import { maskBrazilPhone, normalizeBrazilPhoneToE164 } from "../utils/phone";
 
 const profileTabs = [
@@ -143,6 +143,18 @@ export default function SettingsPage() {
   function updateChannel(patch) {
     setChannelForm((current) => ({ ...current, ...patch }));
   }
+  async function handleCepBlur() {
+    const digits = onlyDigits(profileForm.zip_code);
+    if (digits.length !== 8) return;
+    try {
+      const address = await lookupCep(profileForm.zip_code);
+      updateProfile(address);
+      setError("");
+    } catch (err) {
+      setError(err.message || "Não foi possível buscar o CEP.");
+    }
+  }
+
 
   async function saveProfile(event) {
     event.preventDefault();
@@ -286,16 +298,9 @@ export default function SettingsPage() {
               <Row className="g-3 align-items-end">
                 <Col md={3}>
                   <Form.Label>CEP</Form.Label>
-                  <Form.Control value={profileForm.zip_code} onChange={(event) => updateProfile({ zip_code: maskCep(event.target.value) })} placeholder="00000-000" />
+                  <Form.Control value={profileForm.zip_code} onChange={(event) => updateProfile({ zip_code: maskCep(event.target.value) })} onBlur={handleCepBlur} placeholder="00000-000" />
                 </Col>
-                <Col md={2}>
-                  <CepLookupButton
-                    cep={profileForm.zip_code}
-                    onFound={(address) => updateProfile(address)}
-                    onError={setError}
-                  />
-                </Col>
-                <Col md={5}>
+                <Col md={7}>
                   <Form.Label>Endereço</Form.Label>
                   <Form.Control value={profileForm.address_line} onChange={(event) => updateProfile({ address_line: event.target.value })} />
                 </Col>

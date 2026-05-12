@@ -4,6 +4,7 @@ import DateInput from "../components/DateInput";
 import IntegerInput from "../components/IntegerInput";
 import { Link } from "react-router-dom";
 import api, { apiError, results } from "../api/client";
+import { makeLocalId } from "../utils/localId";
 import EmptyState from "../components/EmptyState";
 import ErrorAlert from "../components/ErrorAlert";
 import MoneyInput from "../components/MoneyInput";
@@ -14,7 +15,7 @@ import SearchAutocompleteInput from "../components/SearchAutocompleteInput";
 import { buildSearchSuggestions } from "../utils/search";
 
 const emptySale = () => ({ customer_id: "", customer_name: "Cliente balcão", due_date: dateInputValue(), discount_amount: "", notes: "", items: [] });
-const emptyLine = () => ({ local_id: crypto.randomUUID(), part_id: "", description: "", quantity: "", unit_price: "", cost_price: "", discount_amount: "", notes: "" });
+const emptyLine = () => ({ local_id: makeLocalId(), part_id: "", description: "", quantity: "", unit_price: "", cost_price: "", discount_amount: "", notes: "" });
 const emptyPayment = (amount = "0.00") => ({ payment_amount: amount, payment_method: "cash", payment_reference: "", payment_notes: "" });
 const emptyReceive = (amount = "0.00") => ({ amount, method: "cash", paid_at: todayDatetimeLocalValue(), reference: "", notes: "" });
 
@@ -81,7 +82,7 @@ export default function CounterSalesPage() {
       due_date: item.due_date || dateInputValue(),
       discount_amount: item.discount_amount || "0.00",
       notes: item.notes || "",
-      items: (item.items || []).map((line) => ({ ...line, local_id: crypto.randomUUID(), part_id: line.part || "" })),
+      items: (item.items || []).map((line) => ({ ...line, local_id: makeLocalId(), part_id: line.part || "" })),
     } : emptySale());
     setShow(true);
   }

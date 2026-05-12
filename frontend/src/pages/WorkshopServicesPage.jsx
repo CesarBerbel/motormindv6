@@ -479,8 +479,9 @@ export default function WorkshopServicesPage() {
                     <MoneyInput value={form.default_unit_price} onChange={(value) => update({ default_unit_price: value })}/>
                   </Col>
                   <Col md={6}>
-                    <Form.Label>Horas</Form.Label>
-                    <IntegerInput step="0.01" value={form.estimated_hours} onChange={(event) => update({ estimated_hours: event.target.value })}/>
+                    <Form.Label>Horas decimais</Form.Label>
+                    <Form.Control type="number" min="0" step="0.01" inputMode="decimal" value={form.estimated_hours} onChange={(event) => update({ estimated_hours: event.target.value })}/>
+                    <Form.Text>Informe o tempo em decimal, por exemplo 1,50 para uma hora e meia.</Form.Text>
                   </Col>
                 </Row>
               </Card.Body>

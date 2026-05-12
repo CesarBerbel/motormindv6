@@ -9,13 +9,13 @@ import NoticeBox from "../components/NoticeBox";
 import EmptyState from "../components/EmptyState";
 import FormTabs, { TabPanel } from "../components/FormTabs";
 import TabbedFormFooter, { InlineTabbedFormFooter } from "../components/TabbedFormFooter";
-import CepLookupButton from "../components/CepLookupButton";
-import { maskCep, maskCpfCnpj } from "../workshopOptions";
+import { maskCep, maskCpfCnpj, onlyDigits } from "../workshopOptions";
 import SearchAutocompleteInput from "../components/SearchAutocompleteInput";
 import { buildSearchSuggestions } from "../utils/search";
 import PhoneInputBR from "../components/PhoneInputBR";
 import { maskBrazilPhone, normalizeBrazilPhoneToE164 } from "../utils/phone";
 import { confirmDialog } from "../components/ConfirmDialog";
+import { lookupCep } from "../utils/cep";
 
 const fallbackRoles = [
   { value: "administrative", label: "Administrativo" },
@@ -37,7 +37,7 @@ const tabs = [
   { key: "photo", label: "Foto 3x4", description: "Imagem do funcionário" },
   { key: "contact", label: "Contato", description: "Email, WhatsApp e telefones" },
   { key: "address", label: "Endereço", description: "Endereço preenchido por CEP" },
-  { key: "extra", label: "Observações", description: "Observações e dados extras" },
+  { key: "extra", label: "Observações", description: "Observações internas" },
 ];
 
 const empty = () => ({
@@ -62,7 +62,7 @@ const empty = () => ({
   state: "",
   country: "Brasil",
   notes: "",
-  custom_data_text: "{}",
+  custom_data: {},
   is_active: true,
   role: "attendant",
   technician_specialty: "",
@@ -91,7 +91,7 @@ function normalizeUser(user) {
     state: user.state || "",
     country: user.country || "Brasil",
     notes: user.notes || "",
-    custom_data_text: JSON.stringify(user.custom_data || {}, null, 2),
+    custom_data: user.custom_data || {},
     is_active: user.is_active,
     role: user.role_value || "attendant",
     technician_specialty: user.technician_specialty_value || "",
@@ -146,13 +146,6 @@ export default function UsersPage() {
   }
 
   function payload() {
-    let customData = {};
-    try {
-      customData = JSON.parse(form.custom_data_text || "{}");
-    } catch {
-      setActiveTab("extra");
-      throw new Error("Dados extras deve ser um JSON válido.");
-    }
     const data = {
       ...form,
       email: form.email.trim().toLowerCase(),
@@ -161,9 +154,8 @@ export default function UsersPage() {
       document_number: maskCpfCnpj(form.document_number),
       zip_code: maskCep(form.zip_code),
       state: form.state.trim().toUpperCase(),
-      custom_data: customData,
+      custom_data: form.custom_data || {},
     };
-    delete data.custom_data_text;
     if (data.person_type === "company") data.last_name = "";
     if (data.role !== "technician") data.technician_specialty = "";
     return data;
@@ -212,6 +204,19 @@ export default function UsersPage() {
     }
   }
 
+  async function handleCepBlur() {
+    if (editingOwner) return;
+    const digits = onlyDigits(form.zip_code);
+    if (digits.length !== 8) return;
+    try {
+      const address = await lookupCep(form.zip_code);
+      update(address);
+      setError("");
+    } catch (err) {
+      setError(err.message || "Não foi possível buscar o CEP.");
+    }
+  }
+
   const editingOwner = editing?.is_owner;
   const isCompany = form.person_type === "company";
 
@@ -257,8 +262,8 @@ export default function UsersPage() {
         </Row>
       </TabPanel>
       <TabPanel activeKey={activeTab} eventKey="contact"><Row className="g-3"><Col md={4}><Form.Label>Email</Form.Label><Form.Control type="email" value={form.email} onChange={(event) => update({ email: event.target.value })} required disabled={editingOwner} placeholder="funcionario@email.com.br" /></Col><Col md={4}><PhoneInputBR label="WhatsApp principal" value={form.phone_e164} onChange={(value) => update({ phone_e164: value })} disabled={editingOwner} /></Col><Col md={4}><PhoneInputBR label="Telefone secundário" value={form.secondary_phone_e164} onChange={(value) => update({ secondary_phone_e164: value })} disabled={editingOwner} helpText="Opcional. Também será salvo em formato +55 para WhatsApp." /></Col></Row></TabPanel>
-      <TabPanel activeKey={activeTab} eventKey="address"><Row className="g-3"><Col md={2}><Form.Label>CEP</Form.Label><Form.Control value={form.zip_code} onChange={(event) => update({ zip_code: maskCep(event.target.value) })} placeholder="00000-000" disabled={editingOwner} /></Col><Col md={2} className="d-flex align-items-end"><CepLookupButton cep={form.zip_code} onFound={(address) => update(address)} onError={setError} /></Col><Col md={4}><Form.Label>Endereço</Form.Label><Form.Control value={form.address_line} onChange={(event) => update({ address_line: event.target.value })} placeholder="Rua, avenida, estrada..." disabled={editingOwner} /></Col><Col md={2}><Form.Label>Número</Form.Label><Form.Control value={form.address_number} onChange={(event) => update({ address_number: event.target.value })} disabled={editingOwner} /></Col><Col md={2}><Form.Label>Complemento</Form.Label><Form.Control value={form.address_complement} onChange={(event) => update({ address_complement: event.target.value })} disabled={editingOwner} /></Col><Col md={4}><Form.Label>Bairro</Form.Label><Form.Control value={form.district} onChange={(event) => update({ district: event.target.value })} disabled={editingOwner} /></Col><Col md={5}><Form.Label>Cidade</Form.Label><Form.Control value={form.city} onChange={(event) => update({ city: event.target.value })} disabled={editingOwner} /></Col><Col md={1}><Form.Label>UF</Form.Label><Form.Control maxLength={2} value={form.state} onChange={(event) => update({ state: event.target.value.toUpperCase() })} disabled={editingOwner} /></Col><Col md={2}><Form.Label>País</Form.Label><Form.Control value={form.country} onChange={(event) => update({ country: event.target.value })} disabled={editingOwner} /></Col></Row></TabPanel>
-      <TabPanel activeKey={activeTab} eventKey="extra"><Row className="g-3"><Col md={6}><Form.Label>Observações internas</Form.Label><Form.Control as="textarea" rows={5} value={form.notes} onChange={(event) => update({ notes: event.target.value })} disabled={editingOwner} /></Col><Col md={6}><Form.Label>Dados extras JSON</Form.Label><Form.Control as="textarea" rows={5} className="code-help" value={form.custom_data_text} onChange={(event) => update({ custom_data_text: event.target.value })} disabled={editingOwner} /></Col></Row></TabPanel>
+      <TabPanel activeKey={activeTab} eventKey="address"><Row className="g-3"><Col md={3}><Form.Label>CEP</Form.Label><Form.Control value={form.zip_code} onChange={(event) => update({ zip_code: maskCep(event.target.value) })} onBlur={handleCepBlur} placeholder="00000-000" disabled={editingOwner} /></Col><Col md={5}><Form.Label>Endereço</Form.Label><Form.Control value={form.address_line} onChange={(event) => update({ address_line: event.target.value })} placeholder="Rua, avenida, estrada..." disabled={editingOwner} /></Col><Col md={2}><Form.Label>Número</Form.Label><Form.Control value={form.address_number} onChange={(event) => update({ address_number: event.target.value })} disabled={editingOwner} /></Col><Col md={2}><Form.Label>Complemento</Form.Label><Form.Control value={form.address_complement} onChange={(event) => update({ address_complement: event.target.value })} disabled={editingOwner} /></Col><Col md={4}><Form.Label>Bairro</Form.Label><Form.Control value={form.district} onChange={(event) => update({ district: event.target.value })} disabled={editingOwner} /></Col><Col md={5}><Form.Label>Cidade</Form.Label><Form.Control value={form.city} onChange={(event) => update({ city: event.target.value })} disabled={editingOwner} /></Col><Col md={1}><Form.Label>UF</Form.Label><Form.Control maxLength={2} value={form.state} onChange={(event) => update({ state: event.target.value.toUpperCase() })} disabled={editingOwner} /></Col><Col md={2}><Form.Label>País</Form.Label><Form.Control value={form.country} onChange={(event) => update({ country: event.target.value })} disabled={editingOwner} /></Col></Row></TabPanel>
+      <TabPanel activeKey={activeTab} eventKey="extra"><Row className="g-3"><Col md={12}><Form.Label>Observações internas</Form.Label><Form.Control as="textarea" rows={5} value={form.notes} onChange={(event) => update({ notes: event.target.value })} disabled={editingOwner} /></Col></Row></TabPanel>
     </Modal.Body><TabbedFormFooter tabs={tabs} activeKey={activeTab} onSelect={setActiveTab} onCancel={() => setShow(false)} saveLabel="Salvar funcionário" saveDisabled={editingOwner} /></Form></Modal>
   </>;
 }

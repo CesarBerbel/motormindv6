@@ -210,17 +210,37 @@ class ServicePackageItemSerializer(serializers.ModelSerializer):
 class ServicePackageSerializer(serializers.ModelSerializer):
     items = ServicePackageItemSerializer(many=True, required=False)
     subtotal_amount = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
-    discount_amount = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0.00"), default=Decimal("0.00"))
+    discount_amount = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0.00"), default=Decimal("0.00"), required=False)
+    discount_percent = serializers.DecimalField(max_digits=5, decimal_places=2, min_value=Decimal("0.00"), max_value=Decimal("100.00"), required=False, default=Decimal("0.00"))
     total_amount = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
 
     class Meta:
         model = ServicePackage
-        fields = ["id", "code", "name", "description", "is_active", "items", "subtotal_amount", "discount_amount", "total_amount", "created_at", "updated_at"]
+        fields = ["id", "code", "name", "description", "is_active", "items", "subtotal_amount", "discount_amount", "discount_percent", "total_amount", "created_at", "updated_at"]
         read_only_fields = ["id", "subtotal_amount", "total_amount", "created_at", "updated_at"]
 
     def validate_code(self, value):
         value = (value or "").strip().upper()
         return value or None
+
+    def _discount_amount_from_percent(self, package, percent):
+        percent = Decimal(str(percent or "0"))
+        subtotal = package.subtotal_amount or ZERO
+        return (subtotal * percent / Decimal("100")).quantize(Decimal("0.01"))
+
+    def _apply_discount_percent(self, package, percent):
+        package.discount_amount = self._discount_amount_from_percent(package, percent)
+        package.save(update_fields=["discount_amount", "updated_at"])
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        subtotal = instance.subtotal_amount or ZERO
+        if subtotal > ZERO:
+            percent = ((instance.discount_amount or ZERO) * Decimal("100") / subtotal).quantize(Decimal("0.01"))
+        else:
+            percent = ZERO
+        data["discount_percent"] = str(percent)
+        return data
 
     def _sync_items(self, package, items_data):
         package.items.all().delete()
@@ -230,17 +250,27 @@ class ServicePackageSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         items_data = validated_data.pop("items", [])
+        discount_percent = validated_data.pop("discount_percent", None)
+        if discount_percent is not None:
+            validated_data.pop("discount_amount", None)
         package = ServicePackage.objects.create(**validated_data)
         self._sync_items(package, items_data)
+        if discount_percent is not None:
+            self._apply_discount_percent(package, discount_percent)
         return package
 
     def update(self, instance, validated_data):
         items_data = validated_data.pop("items", None)
+        discount_percent = validated_data.pop("discount_percent", None)
+        if discount_percent is not None:
+            validated_data.pop("discount_amount", None)
         for key, value in validated_data.items():
             setattr(instance, key, value)
         instance.save()
         if items_data is not None:
             self._sync_items(instance, items_data)
+        if discount_percent is not None:
+            self._apply_discount_percent(instance, discount_percent)
         return instance
 
 
@@ -269,7 +299,8 @@ class PartSerializer(serializers.ModelSerializer):
     class Meta:
         model = Part
         fields = ["id", "sku", "name", "category", "category_id", "category_name", "brand", "brand_normalized_name", "photo", "photo_url", "remove_photo", "location", "unit", "unit_label", "cost_price", "sale_price", "stock_quantity", "reserved_quantity", "available_quantity", "minimum_stock", "is_low_stock", "stock_value", "is_featured", "usage_count", "is_active", "notes", "created_at", "updated_at"]
-        read_only_fields = ["id", "category", "category_name", "brand_normalized_name", "photo_url", "unit_label", "reserved_quantity", "available_quantity", "is_low_stock", "stock_value", "usage_count", "created_at", "updated_at"]
+        read_only_fields = ["id", "category", "category_name", "brand_normalized_name", "photo_url", "unit_label", "stock_quantity", "reserved_quantity", "available_quantity", "minimum_stock", "is_low_stock", "stock_value", "usage_count", "created_at", "updated_at"]
+        extra_kwargs = {"sku": {"required": False, "allow_blank": True}}
 
     def get_brand_normalized_name(self, obj):
         return normalize_lookup_name(obj.brand) if obj.brand else ""
@@ -312,6 +343,8 @@ class PartSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         validated_data.pop("remove_photo", None)
+        if not validated_data.get("sku"):
+            validated_data["sku"] = Part.generate_sku()
         self._sync_brand(validated_data)
         return super().create(validated_data)
 

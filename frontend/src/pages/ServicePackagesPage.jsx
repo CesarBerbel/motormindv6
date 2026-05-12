@@ -14,17 +14,24 @@ import { money } from "../workshopOptions";
 import SearchAutocompleteInput from "../components/SearchAutocompleteInput";
 import { confirmDialog } from "../components/ConfirmDialog";
 
+let localIdCounter = 0;
+function makeLocalId() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  localIdCounter += 1;
+  return `local-${Date.now()}-${localIdCounter}`;
+}
+
 const emptyPackage = () => ({
   code: "",
   name: "",
   description: "",
-  discount_amount: "",
+  discount_percent: "",
   is_active: true,
   items: [],
 });
 
 const emptyItem = () => ({
-  local_id: crypto.randomUUID(),
+  local_id: makeLocalId(),
   service_id: "",
   description: "",
   quantity: "1",
@@ -49,7 +56,7 @@ function packageSearchSuggestion(servicePackage) {
   const totals = [
     `${packageItems.length || 0} serviço(s)`,
     `Subtotal: ${money(servicePackage.subtotal_amount)}`,
-    `Desconto: ${money(servicePackage.discount_amount)}`,
+    `Desconto: ${servicePackage.discount_percent || "0.00"}% (${money(servicePackage.discount_amount)})`,
     `Total: ${money(servicePackage.total_amount)}`,
   ].join(" • ");
 
@@ -68,6 +75,7 @@ function packageSearchSuggestion(servicePackage) {
       status,
       servicePackage.subtotal_amount,
       servicePackage.discount_amount,
+      servicePackage.discount_percent,
       servicePackage.total_amount,
       ...packageItems.flatMap((line) => [
         line.service_code,
@@ -112,7 +120,8 @@ export default function ServicePackagesPage() {
     })),
   ];
   const formSubtotal = useMemo(() => form.items.reduce((total, item) => total + itemSubtotal(item), 0), [form.items]);
-  const formTotal = useMemo(() => Math.max(formSubtotal - decimal(form.discount_amount), 0), [formSubtotal, form.discount_amount]);
+  const formDiscountAmount = useMemo(() => (formSubtotal * decimal(form.discount_percent)) / 100, [formSubtotal, form.discount_percent]);
+  const formTotal = useMemo(() => Math.max(formSubtotal - formDiscountAmount, 0), [formSubtotal, formDiscountAmount]);
 
   async function load(nextSearch = search) {
     const normalizedSearch = String(nextSearch || "").trim();
@@ -172,10 +181,10 @@ export default function ServicePackagesPage() {
         code: item.code || "",
         name: item.name || "",
         description: item.description || "",
-        discount_amount: item.discount_amount || "0.00",
+        discount_percent: item.discount_percent || "0.00",
         is_active: item.is_active,
         items: (item.items || []).map((line, index) => ({
-          local_id: crypto.randomUUID(),
+          local_id: makeLocalId(),
           service_id: line.service || "",
           description: line.description || "",
           quantity: line.quantity || "1.00",
@@ -229,6 +238,7 @@ export default function ServicePackagesPage() {
 
     const payload = {
       ...form,
+      discount_percent: form.discount_percent || "0.00",
       items: form.items.map((line, index) => ({
         service_id: line.service_id ? Number(line.service_id) : null,
         description: line.description,
@@ -311,7 +321,7 @@ export default function ServicePackagesPage() {
               <td className="fw-semibold">{item.name}</td>
               <td>{item.items?.length || 0}</td>
               <td>{money(item.subtotal_amount)}</td>
-              <td>{money(item.discount_amount)}</td>
+              <td>{item.discount_percent || "0.00"}% ({money(item.discount_amount)})</td>
               <td>{money(item.total_amount)}</td>
               <td>{item.is_active ? "Ativo" : "Inativo"}</td>
               <td className="text-end">
@@ -349,9 +359,9 @@ export default function ServicePackagesPage() {
                     <Form.Check label="Ativo" checked={!!form.is_active} onChange={(event) => update({ is_active: event.target.checked })}/>
                   </Col>
                   <Col md={3}>
-                    <Form.Label>Desconto do pacote</Form.Label>
-                    <MoneyInput value={form.discount_amount} onChange={(value) => update({ discount_amount: value })}/>
-                    <Form.Text>Aplicado uma vez sobre o total do pacote, não em cada serviço.</Form.Text>
+                    <Form.Label>Desconto do pacote (%)</Form.Label>
+                    <Form.Control type="number" min="0" max="100" step="0.01" inputMode="decimal" value={form.discount_percent || ""} onChange={(event) => update({ discount_percent: event.target.value })}/>
+                    <Form.Text>Percentual aplicado uma vez sobre o total dos serviços do pacote.</Form.Text>
                   </Col>
                 </Row>
 
@@ -407,7 +417,7 @@ export default function ServicePackagesPage() {
 
                 <div className="text-end fs-5 form-muted-box mt-3">
                   <div>Subtotal dos serviços: <strong>{money(formSubtotal)}</strong></div>
-                  <div>Desconto do pacote: <strong>{money(form.discount_amount)}</strong></div>
+                  <div>Desconto do pacote: <strong>{decimal(form.discount_percent).toFixed(2)}% ({money(formDiscountAmount)})</strong></div>
                   <div>Total do pacote: <strong>{money(formTotal)}</strong></div>
                 </div>
               </Card.Body>

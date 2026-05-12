@@ -96,6 +96,7 @@ class PurchaseOrder(TimeStampedModel):
         ORDERED = "ordered", "Pedido enviado"
         PARTIALLY_RECEIVED = "partially_received", "Recebido parcial"
         RECEIVED = "received", "Recebido"
+        RETURNED = "returned", "Devolvido"
         CANCELLED = "cancelled", "Cancelado"
 
     class Origin(models.TextChoices):
@@ -154,7 +155,7 @@ class PurchaseOrder(TimeStampedModel):
 
     def refresh_status_from_receipts(self, save=True):
         items = list(self.items.all())
-        if self.status == self.Status.CANCELLED:
+        if self.status in {self.Status.CANCELLED, self.Status.RETURNED}:
             return self
         if not items:
             self.status = self.Status.DRAFT

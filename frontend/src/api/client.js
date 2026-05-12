@@ -19,6 +19,7 @@ let refreshPromise = null;
 const NUMERIC_ZERO_FIELDS = new Set([
   "amount",
   "discount_amount",
+  "discount_percent",
   "manual_discount_amount",
   "payment_amount",
   "unit_price",

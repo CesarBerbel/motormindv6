@@ -4,6 +4,7 @@ import { Alert, Button, Card, Col, Form, Row, Table } from "react-bootstrap";
 import IntegerInput from "../components/IntegerInput";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import api, { apiError, results } from "../api/client";
+import { makeLocalId } from "../utils/localId";
 import AreaTabs from "../components/AreaTabs";
 import ErrorAlert from "../components/ErrorAlert";
 import SystemToast from "../components/SystemToast";
@@ -55,7 +56,7 @@ function contactSearchText(contact) {
 
 function serviceLineFromService(service) {
   return {
-    local_id: crypto.randomUUID(),
+    local_id: makeLocalId(),
     service_id: service.id,
     source_package_id: null,
     source_package_name: "",
@@ -69,7 +70,7 @@ function serviceLineFromService(service) {
 
 function serviceLineFromPackageItem(item, servicePackage) {
   return {
-    local_id: crypto.randomUUID(),
+    local_id: makeLocalId(),
     service_id: item.service || item.service_id || null,
     source_package_id: servicePackage.id,
     source_package_name: servicePackage.name,
@@ -399,7 +400,7 @@ export default function WorkOrderFormPage({ embedded = false }) {
     if (!files.length) return;
     setOpeningPhotos((current) => [
       ...current,
-      ...files.map((file) => ({ local_id: crypto.randomUUID(), file, caption: photoCaption || "Foto de abertura da OS" })),
+      ...files.map((file) => ({ local_id: makeLocalId(), file, caption: photoCaption || "Foto de abertura da OS" })),
     ]);
   }
 

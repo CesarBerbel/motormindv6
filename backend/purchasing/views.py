@@ -12,6 +12,8 @@ from accounts.services import user_has_permission
 from finance.services import ensure_payable_for_purchase_order
 
 from .models import PurchaseOrder, Supplier
+from .services import return_received_purchase_order
+
 from .serializers import (
     PurchaseOrderSerializer,
     PurchaseOrderStatusSerializer,
@@ -73,8 +75,34 @@ class SupplierViewSet(viewsets.ModelViewSet):
 class PurchaseOrderViewSet(viewsets.ModelViewSet):
     serializer_class = PurchaseOrderSerializer
     permission_classes = [HasViewPermission]
-    permission_code_map = {"read": "purchases.view", "write": "purchases.manage", "change_status": "purchases.manage", "receive": "purchases.manage"}
+    permission_code_map = {"read": "purchases.view", "write": "purchases.manage", "change_status": "purchases.manage", "receive": "purchases.manage", "return_order": "purchases.manage"}
     queryset = PurchaseOrder.objects.select_related("supplier", "work_order", "account_payable").prefetch_related("items__part").all()
+
+    locked_statuses = {PurchaseOrder.Status.RECEIVED, PurchaseOrder.Status.RETURNED}
+
+    def _locked_response(self, purchase_order):
+        return Response(
+            {"detail": "Pedido de compra recebido ou devolvido não pode ser editado, excluído ou reaberto. Use Devolução para estornar um pedido recebido."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    def update(self, request, *args, **kwargs):
+        purchase_order = self.get_object()
+        if purchase_order.status in self.locked_statuses:
+            return self._locked_response(purchase_order)
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        purchase_order = self.get_object()
+        if purchase_order.status in self.locked_statuses:
+            return self._locked_response(purchase_order)
+        return super().partial_update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        purchase_order = self.get_object()
+        if purchase_order.status in self.locked_statuses:
+            return self._locked_response(purchase_order)
+        return super().destroy(request, *args, **kwargs)
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -102,6 +130,17 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         serializer = PurchaseOrderStatusSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         new_status = serializer.validated_data["status"]
+
+        if purchase_order.status == PurchaseOrder.Status.RETURNED:
+            return Response({"detail": "Pedido de compra devolvido não pode ter status alterado."}, status=status.HTTP_400_BAD_REQUEST)
+        if purchase_order.status == PurchaseOrder.Status.RECEIVED and new_status != PurchaseOrder.Status.RETURNED:
+            return Response({"detail": "Pedido de compra recebido só pode mudar para Devolvido."}, status=status.HTTP_400_BAD_REQUEST)
+        if new_status == PurchaseOrder.Status.RETURNED:
+            try:
+                updated, movements = return_received_purchase_order(purchase_order, actor=request.user, notes=serializer.validated_data.get("notes", ""))
+            except ValidationError as exc:
+                return Response({"detail": exc.messages if hasattr(exc, "messages") else str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"purchase_order": PurchaseOrderSerializer(updated).data, "stock_movement_ids": [movement.id for movement in movements]})
 
         if new_status == PurchaseOrder.Status.APPROVED and not user_has_permission(request.user, "purchases.approve"):
             return Response({"detail": "Somente Administrativo, Financeiro ou Dono podem aprovar pedidos de compra."}, status=status.HTTP_403_FORBIDDEN)
@@ -140,7 +179,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
     @transaction.atomic
     def receive(self, request, pk=None):
         purchase_order = self.get_object()
-        if purchase_order.status in {PurchaseOrder.Status.DRAFT, PurchaseOrder.Status.REQUESTED, PurchaseOrder.Status.CANCELLED}:
+        if purchase_order.status in {PurchaseOrder.Status.DRAFT, PurchaseOrder.Status.REQUESTED, PurchaseOrder.Status.RECEIVED, PurchaseOrder.Status.RETURNED, PurchaseOrder.Status.CANCELLED}:
             return Response({"detail": "Somente pedidos aprovados, enviados ou parcialmente recebidos podem receber itens."}, status=status.HTTP_400_BAD_REQUEST)
         serializer = ReceivePurchaseOrderSerializer(data=request.data, context={"purchase_order": purchase_order, "actor": request.user})
         serializer.is_valid(raise_exception=True)
@@ -150,4 +189,14 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
                 ensure_payable_for_purchase_order(updated, actor=request.user)
             except ValidationError:
                 pass
+        return Response({"purchase_order": PurchaseOrderSerializer(updated).data, "stock_movement_ids": [movement.id for movement in movements]}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="return")
+    @transaction.atomic
+    def return_order(self, request, pk=None):
+        purchase_order = self.get_object()
+        try:
+            updated, movements = return_received_purchase_order(purchase_order, actor=request.user, notes=request.data.get("notes", ""))
+        except ValidationError as exc:
+            return Response({"detail": exc.messages if hasattr(exc, "messages") else str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response({"purchase_order": PurchaseOrderSerializer(updated).data, "stock_movement_ids": [movement.id for movement in movements]}, status=status.HTTP_200_OK)

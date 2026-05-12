@@ -225,8 +225,8 @@ def ensure_purchases_for_work_order_shortages(work_order, actor=None):
 def receive_purchase_order_items(purchase_order, items, actor=None):
     movements = []
     locked_order = PurchaseOrder.objects.select_for_update(of=("self",)).get(pk=purchase_order.pk)
-    if locked_order.status == PurchaseOrder.Status.CANCELLED:
-        raise ValidationError("Pedido cancelado não pode receber itens.")
+    if locked_order.status in {PurchaseOrder.Status.CANCELLED, PurchaseOrder.Status.RETURNED}:
+        raise ValidationError("Pedido cancelado ou devolvido não pode receber itens.")
     for item_data in items:
         item_id = item_data.get("item_id")
         quantity = Decimal(str(item_data.get("quantity", "0")))
@@ -264,6 +264,54 @@ def receive_purchase_order_items(purchase_order, items, actor=None):
             WorkOrderEvent.EventType.INVENTORY_CONSUMED,
             actor=actor,
             description=f"Itens recebidos no pedido de compra {locked_order.number}.",
+            data={"purchase_order_id": locked_order.id, "stock_movement_ids": [movement.id for movement in movements]},
+        )
+    return locked_order, movements
+
+
+@transaction.atomic
+def return_received_purchase_order(purchase_order, actor=None, notes=""):
+    """Marca um pedido recebido como devolvido e estorna o estoque recebido.
+
+    A devolução é intencionalmente restrita a pedidos totalmente recebidos para
+    evitar reabrir/editar compras já incorporadas ao estoque sem trilha de
+    movimentação. Cada item recebido gera um movimento negativo de estorno.
+    """
+    locked_order = PurchaseOrder.objects.select_for_update(of=("self",)).prefetch_related("items__part").get(pk=purchase_order.pk)
+    if locked_order.status == PurchaseOrder.Status.RETURNED:
+        return locked_order, []
+    if locked_order.status != PurchaseOrder.Status.RECEIVED:
+        raise ValidationError("Somente pedido de compra recebido pode ser devolvido.")
+
+    movements = []
+    for item in locked_order.items.select_related("part").all():
+        quantity = item.received_quantity or ZERO
+        if quantity <= ZERO:
+            continue
+        if not item.part_id:
+            raise ValidationError(f"O item {item.description} não possui peça vinculada para devolução do estoque.")
+        movement = adjust_part_stock(
+            item.part,
+            quantity=-quantity,
+            movement_type=PartStockMovement.MovementType.REVERSAL,
+            actor=actor,
+            notes=notes or f"Devolução do pedido de compra {locked_order.number}",
+            unit_cost=item.unit_cost or item.part.cost_price,
+        )
+        movements.append(movement)
+
+    locked_order.status = PurchaseOrder.Status.RETURNED
+    locked_order.updated_by = actor if getattr(actor, "is_authenticated", False) else locked_order.updated_by
+    if notes:
+        locked_order.notes = (locked_order.notes + "\n" if locked_order.notes else "") + notes
+    locked_order.save(update_fields=["status", "updated_by", "notes", "updated_at"])
+
+    if locked_order.work_order_id:
+        record_event(
+            locked_order.work_order,
+            WorkOrderEvent.EventType.INVENTORY_CONSUMED,
+            actor=actor,
+            description=f"Pedido de compra {locked_order.number} devolvido; estoque estornado.",
             data={"purchase_order_id": locked_order.id, "stock_movement_ids": [movement.id for movement in movements]},
         )
     return locked_order, movements

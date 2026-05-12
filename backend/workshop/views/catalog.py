@@ -89,12 +89,12 @@ class CepLookupView(APIView):
             response = requests.get(f"https://viacep.com.br/ws/{digits}/json/", timeout=8)
             response.raise_for_status()
             data = response.json()
-        except requests.RequestException as exc:
-            return Response({"detail": "Falha ao consultar o CEP na base ViaCEP.", "error": str(exc)}, status=status.HTTP_502_BAD_GATEWAY)
+        except requests.RequestException:
+            return Response({"detail": "Não foi possível consultar o CEP agora. Verifique sua conexão e tente novamente."}, status=status.HTTP_502_BAD_GATEWAY)
         except ValueError:
-            return Response({"detail": "Resposta inválida recebida da base ViaCEP."}, status=status.HTTP_502_BAD_GATEWAY)
+            return Response({"detail": "A consulta de CEP retornou uma resposta inválida. Tente novamente."}, status=status.HTTP_502_BAD_GATEWAY)
         if data.get("erro"):
-            raise ValidationError({"cep": "CEP não encontrado na base ViaCEP."})
+            return Response({"detail": "Não encontrei esse CEP. Confira os 8 dígitos ou preencha o endereço manualmente."}, status=status.HTTP_404_NOT_FOUND)
         formatted = data.get("cep") or f"{digits[:5]}-{digits[5:]}"
         return Response({
             "zip_code": formatted,
@@ -103,6 +103,56 @@ class CepLookupView(APIView):
             "city": data.get("localidade") or "",
             "state": data.get("uf") or "",
             "country": "Brasil",
+        })
+
+
+class CnpjLookupView(APIView):
+    permission_classes = [HasViewPermission]
+    permission_code = ["contacts.manage", "suppliers.manage"]
+
+    def get(self, request):
+        cnpj = request.query_params.get("cnpj", "")
+        digits = "".join(ch for ch in cnpj if ch.isdigit())
+        if len(digits) != 14:
+            raise ValidationError({"cnpj": "Informe um CNPJ com 14 dígitos."})
+        try:
+            response = requests.get(f"https://brasilapi.com.br/api/cnpj/v1/{digits}", timeout=10)
+        except requests.RequestException:
+            return Response({"detail": "Não foi possível consultar o CNPJ na BrasilAPI agora. Tente novamente ou preencha os dados manualmente."}, status=status.HTTP_502_BAD_GATEWAY)
+        if response.status_code == 404:
+            return Response({"detail": "Não encontrei esse CNPJ na BrasilAPI. Confira os 14 dígitos ou preencha os dados manualmente."}, status=status.HTTP_404_NOT_FOUND)
+        if response.status_code == 400:
+            return Response({"detail": "CNPJ inválido ou mal formatado para consulta na BrasilAPI."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            response.raise_for_status()
+            data = response.json()
+        except requests.RequestException:
+            return Response({"detail": "A BrasilAPI não respondeu como esperado. Tente novamente em instantes."}, status=status.HTTP_502_BAD_GATEWAY)
+        except ValueError:
+            return Response({"detail": "A consulta de CNPJ retornou uma resposta inválida. Tente novamente."}, status=status.HTTP_502_BAD_GATEWAY)
+
+        cep = "".join(ch for ch in str(data.get("cep") or "") if ch.isdigit())
+        formatted_cep = f"{cep[:5]}-{cep[5:]}" if len(cep) == 8 else cep
+        phone_digits = "".join(ch for ch in str(data.get("ddd_telefone_1") or "") if ch.isdigit())
+        phone = f"+55{phone_digits}" if len(phone_digits) in (10, 11) else ""
+        return Response({
+            "document": f"{digits[:2]}.{digits[2:5]}.{digits[5:8]}/{digits[8:12]}-{digits[12:]}",
+            "name": data.get("razao_social") or "",
+            "trade_name": data.get("nome_fantasia") or "",
+            "birth_date": data.get("data_inicio_atividade") or None,
+            "email": (data.get("email") or "").strip().lower(),
+            "phone": phone,
+            "zip_code": formatted_cep,
+            "address_line": data.get("logradouro") or "",
+            "address_number": data.get("numero") or "",
+            "address_complement": data.get("complemento") or "",
+            "district": data.get("bairro") or "",
+            "city": data.get("municipio") or "",
+            "state": data.get("uf") or "",
+            "country": "Brasil",
+            "registration_status": data.get("descricao_situacao_cadastral") or "",
+            "main_activity": data.get("cnae_fiscal_descricao") or "",
+            "legal_nature": data.get("natureza_juridica") or "",
         })
 
 
@@ -201,6 +251,10 @@ class PartViewSet(viewsets.ModelViewSet):
         if ordering == "most_used":
             return qs.order_by("-is_featured", "-usage_count", "category__name", "name", "sku")
         return qs
+
+    @action(detail=False, methods=["get"], url_path="next-sku")
+    def next_sku(self, request):
+        return Response({"sku": Part.generate_sku()})
 
     @action(detail=True, methods=["post"])
     def adjust_stock(self, request, pk=None):

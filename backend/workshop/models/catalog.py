@@ -272,6 +272,21 @@ class Part(TimeStampedModel):
     def stock_value(self):
         return (self.stock_quantity or ZERO) * (self.cost_price or ZERO)
 
+    @classmethod
+    def generate_sku(cls):
+        existing = cls.objects.filter(sku__startswith="PCA-").values_list("sku", flat=True)
+        last_number = 0
+        pattern = re.compile(r"^PCA-(\d+)$", re.IGNORECASE)
+        for sku in existing:
+            match = pattern.match(str(sku or "").strip())
+            if not match:
+                continue
+            try:
+                last_number = max(last_number, int(match.group(1)))
+            except ValueError:
+                continue
+        return f"PCA-{last_number + 1:05d}"
+
     def clean(self):
         super().clean()
         self.unit = normalize_part_unit(self.unit)
@@ -280,6 +295,10 @@ class Part(TimeStampedModel):
             raise ValidationError({"unit": "Selecione uma unidade cadastrada na lista controlada."})
 
     def save(self, *args, **kwargs):
+        if not self.sku:
+            self.sku = self.generate_sku()
+        else:
+            self.sku = str(self.sku).strip().upper()
         self.unit = normalize_part_unit(self.unit)
         self.full_clean()
         super().save(*args, **kwargs)

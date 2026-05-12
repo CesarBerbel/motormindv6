@@ -5,14 +5,15 @@ import api, { apiError, results } from "../api/client";
 import PageHeader from "../components/PageHeader";
 import ErrorAlert from "../components/ErrorAlert";
 import EmptyState from "../components/EmptyState";
-import CepLookupButton from "../components/CepLookupButton";
+import CnpjLookupButton from "../components/CnpjLookupButton";
 import FormTabs, { TabPanel } from "../components/FormTabs";
 import TabbedFormFooter, { InlineTabbedFormFooter } from "../components/TabbedFormFooter";
-import { formatDate, maskCep, maskCpfCnpj } from "../workshopOptions";
+import { formatDate, maskCep, maskCpfCnpj, onlyDigits } from "../workshopOptions";
 import SearchAutocompleteInput from "../components/SearchAutocompleteInput";
 import PhoneInputBR from "../components/PhoneInputBR";
 import { maskBrazilPhone, normalizeBrazilPhoneToE164 } from "../utils/phone";
 import { confirmDialog } from "../components/ConfirmDialog";
+import { lookupCep } from "../utils/cep";
 
 const emptyContact = () => ({
   person_type: "individual",
@@ -36,7 +37,7 @@ const emptyContact = () => ({
   country: "Brasil",
   notes: "",
   group_ids: [],
-  custom_data_text: "{}",
+  custom_data: {},
   is_active: true,
 });
 
@@ -44,7 +45,7 @@ const tabs = [
   { key: "identification", label: "Identificação", description: "PF/PJ, CPF/CNPJ e dados básicos" },
   { key: "contact", label: "Contato", description: "Email, WhatsApp e telefones" },
   { key: "address", label: "Endereço", description: "Endereço brasileiro completo" },
-  { key: "extra", label: "Classificação", description: "Grupos, observações e dados extras" },
+  { key: "extra", label: "Classificação", description: "Grupos e observações" },
 ];
 
 function normalizeContact(contact) {
@@ -70,7 +71,7 @@ function normalizeContact(contact) {
     country: contact.country || "Brasil",
     notes: contact.notes || "",
     group_ids: (contact.groups || []).map((group) => group.id),
-    custom_data_text: JSON.stringify(contact.custom_data || {}, null, 2),
+    custom_data: contact.custom_data || {},
     is_active: contact.is_active,
   };
 }
@@ -184,14 +185,6 @@ export default function ContactsPage() {
   async function save(event) {
     event.preventDefault();
     setError("");
-    let customData = {};
-    try {
-      customData = JSON.parse(form.custom_data_text || "{}");
-    } catch {
-      setError("Dados extras deve ser um JSON válido.");
-      setActiveTab("extra");
-      return;
-    }
     const payload = {
       ...form,
       email: form.email.trim(),
@@ -201,9 +194,8 @@ export default function ContactsPage() {
       zip_code: maskCep(form.zip_code),
       state: form.state.trim().toUpperCase(),
       birth_date: form.birth_date || null,
-      custom_data: customData,
+      custom_data: form.custom_data || {},
     };
-    delete payload.custom_data_text;
     if (payload.person_type === "company") payload.last_name = "";
     try {
       if (editing) await api.put(`/contacts/${editing.id}/`, payload);
@@ -223,6 +215,45 @@ export default function ContactsPage() {
     } catch (err) {
       setError(apiError(err));
     }
+  }
+
+  async function handleCepBlur() {
+    const digits = onlyDigits(form.zip_code);
+    if (digits.length !== 8) return;
+    try {
+      const address = await lookupCep(form.zip_code);
+      update(address);
+      setError("");
+    } catch (err) {
+      setError(err.message || "Não foi possível buscar o CEP.");
+    }
+  }
+
+
+  function applyCompanyLookup(company) {
+    update({
+      person_type: "company",
+      first_name: company.name || form.first_name,
+      trade_name: company.trade_name || form.trade_name,
+      document_number: company.document || form.document_number,
+      birth_date: company.birth_date || form.birth_date,
+      email: company.email || form.email,
+      phone_e164: company.phone || form.phone_e164,
+      zip_code: company.zip_code || form.zip_code,
+      address_line: company.address_line || form.address_line,
+      address_number: company.address_number || form.address_number,
+      address_complement: company.address_complement || form.address_complement,
+      district: company.district || form.district,
+      city: company.city || form.city,
+      state: (company.state || form.state || "").toUpperCase(),
+      country: company.country || form.country || "Brasil",
+      notes: [
+        form.notes,
+        company.registration_status ? `Situação cadastral BrasilAPI: ${company.registration_status}` : "",
+        company.main_activity ? `Atividade principal: ${company.main_activity}` : "",
+        company.legal_nature ? `Natureza jurídica: ${company.legal_nature}` : "",
+      ].filter(Boolean).join("\n"),
+    });
   }
 
   const isCompany = form.person_type === "company";
@@ -306,6 +337,11 @@ export default function ContactsPage() {
                 <Col md={isCompany ? 3 : 2}>
                   <Form.Label>{isCompany ? "CNPJ" : "CPF"}</Form.Label>
                   <Form.Control value={form.document_number} onChange={(e) => update({ document_number: maskCpfCnpj(e.target.value) })} placeholder={isCompany ? "00.000.000/0000-00" : "000.000.000-00"} />
+                  {isCompany && (
+                    <div className="mt-2">
+                      <CnpjLookupButton cnpj={form.document_number} onFound={applyCompanyLookup} onError={setError} />
+                    </div>
+                  )}
                 </Col>
                 {isCompany && (
                   <Col md={4}>
@@ -347,9 +383,8 @@ export default function ContactsPage() {
             </TabPanel>
             <TabPanel activeKey={activeTab} eventKey="address">
               <Row className="g-3">
-                <Col md={2}><Form.Label>CEP</Form.Label><Form.Control value={form.zip_code} onChange={(e) => update({ zip_code: maskCep(e.target.value) })} placeholder="00000-000" /></Col>
-                <Col md={2} className="d-flex align-items-end"><CepLookupButton cep={form.zip_code} onFound={(address) => update(address)} onError={setError} /></Col>
-                <Col md={4}><Form.Label>Endereço</Form.Label><Form.Control value={form.address_line} onChange={(e) => update({ address_line: e.target.value })} placeholder="Rua, avenida, estrada..." /></Col>
+                <Col md={3}><Form.Label>CEP</Form.Label><Form.Control value={form.zip_code} onChange={(e) => update({ zip_code: maskCep(e.target.value) })} onBlur={handleCepBlur} placeholder="00000-000" /></Col>
+                <Col md={5}><Form.Label>Endereço</Form.Label><Form.Control value={form.address_line} onChange={(e) => update({ address_line: e.target.value })} placeholder="Rua, avenida, estrada..." /></Col>
                 <Col md={2}><Form.Label>Número</Form.Label><Form.Control value={form.address_number} onChange={(e) => update({ address_number: e.target.value })} /></Col>
                 <Col md={2}><Form.Label>Complemento</Form.Label><Form.Control value={form.address_complement} onChange={(e) => update({ address_complement: e.target.value })} /></Col>
                 <Col md={4}><Form.Label>Bairro</Form.Label><Form.Control value={form.district} onChange={(e) => update({ district: e.target.value })} /></Col>
@@ -370,10 +405,6 @@ export default function ContactsPage() {
                 <Col md={6}>
                   <Form.Label>Observações internas</Form.Label>
                   <Form.Control as="textarea" rows={5} value={form.notes} onChange={(e) => update({ notes: e.target.value })} />
-                </Col>
-                <Col md={12}>
-                  <Form.Label>Dados extras JSON</Form.Label>
-                  <Form.Control as="textarea" rows={5} className="code-help" value={form.custom_data_text} onChange={(e) => update({ custom_data_text: e.target.value })} />
                 </Col>
                 <Col md={12}><Form.Check label="Cliente ativo" checked={form.is_active} onChange={(e) => update({ is_active: e.target.checked })} /></Col>
               </Row>

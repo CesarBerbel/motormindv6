@@ -6,6 +6,7 @@ por qualquer integração existente.
 
 from .catalog import (
     CepLookupView,
+    CnpjLookupView,
     FipeLookupView,
     GeneralCategoryViewSet,
     PartBrandViewSet,
@@ -36,6 +37,7 @@ __all__ = [
     "CustomerApprovalPdfView",
     "CustomerApprovalPublicView",
     "CepLookupView",
+    "CnpjLookupView",
     "FipeLookupView",
     "GeneralCategoryViewSet",
     "PartBrandViewSet",

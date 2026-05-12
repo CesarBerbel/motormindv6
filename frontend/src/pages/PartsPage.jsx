@@ -24,8 +24,9 @@ const empty = () => ({
   unit: "un",
   cost_price: "",
   sale_price: "",
-  stock_quantity: "",
-  minimum_stock: "",
+  initial_stock_quantity: "",
+  initial_stock_unit_cost: "",
+  initial_stock_notes: "Entrada inicial no cadastro da peça",
   is_featured: false,
   is_active: true,
   notes: "",
@@ -38,6 +39,13 @@ const emptyAdj = () => ({
   notes: "",
 });
 
+function asDecimal(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return 0;
+  const normalized = text.includes(",") ? text.replace(/\./g, "").replace(",", ".") : text;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
 
 function partSearchSuggestion(part) {
   const title = [part.sku, part.name].filter(Boolean).join(" - ") || "Peça sem nome";
@@ -88,7 +96,7 @@ function buildPartSearchSuggestions(parts) {
 
 const tabs = [
   { key: "identification", label: "Identificação", description: "SKU, peça, categoria e marca" },
-  { key: "stock", label: "Estoque e preços", description: "Unidade, custo, venda e mínimo" },
+  { key: "stock", label: "Preço e entrada", description: "Unidade, custo, venda e entrada inicial" },
   { key: "photo", label: "Foto", description: "Imagem da peça" },
   { key: "notes", label: "Observações", description: "Status e notas internas" },
 ];
@@ -192,26 +200,41 @@ export default function PartsPage() {
     setForm((current) => ({ ...current, ...patch }));
   }
 
-  function open(item = null) {
+  async function nextPartSku() {
+    try {
+      const { data } = await api.get("/workshop/parts/next-sku/");
+      return data?.sku || "";
+    } catch (err) {
+      setError(apiError(err));
+      return "";
+    }
+  }
+
+  async function open(item = null) {
     setEditing(item);
     setActiveTab("identification");
     setPhotoFile(null);
     setRemovePhoto(false);
-    setForm(item ? {
-      sku: item.sku || "",
-      name: item.name || "",
-      category_id: item.category || "",
-      brand: item.brand || "",
-      location: item.location || "",
-      unit: normalizePartUnit(item.unit || "un"),
-      cost_price: item.cost_price || "0.00",
-      sale_price: item.sale_price || "0.00",
-      stock_quantity: item.stock_quantity || "0.00",
-      minimum_stock: item.minimum_stock || "0.00",
-      is_featured: !!item.is_featured,
-      is_active: !!item.is_active,
-      notes: item.notes || "",
-    } : empty());
+    if (item) {
+      setForm({
+        sku: item.sku || "",
+        name: item.name || "",
+        category_id: item.category || "",
+        brand: item.brand || "",
+        location: item.location || "",
+        unit: normalizePartUnit(item.unit || "un"),
+        cost_price: item.cost_price || "0.00",
+        sale_price: item.sale_price || "0.00",
+        initial_stock_quantity: "",
+        initial_stock_unit_cost: item.cost_price || "0.00",
+        initial_stock_notes: "",
+        is_featured: !!item.is_featured,
+        is_active: !!item.is_active,
+        notes: item.notes || "",
+      });
+    } else {
+      setForm({ ...empty(), sku: await nextPartSku() });
+    }
     loadBrandOptions(item?.brand || "");
     setShow(true);
   }
@@ -225,18 +248,38 @@ export default function PartsPage() {
     event.preventDefault();
     try {
       const payload = {
-        ...form,
+        sku: form.sku,
+        name: form.name,
         category_id: form.category_id ? Number(form.category_id) : "",
+        brand: form.brand,
+        location: form.location,
         unit: normalizePartUnit(form.unit),
+        cost_price: form.cost_price || "0.00",
+        sale_price: form.sale_price || "0.00",
+        is_featured: !!form.is_featured,
+        is_active: !!form.is_active,
+        notes: form.notes || "",
         remove_photo: removePhoto ? "true" : "false",
       };
       const formData = new FormData();
       Object.entries(payload).forEach(([key, value]) => formData.append(key, value ?? ""));
       if (photoFile) formData.append("photo", photoFile);
+      let savedPart;
       if (editing) {
-        await api.put(`/workshop/parts/${editing.id}/`, formData);
+        const { data } = await api.put(`/workshop/parts/${editing.id}/`, formData);
+        savedPart = data;
       } else {
-        await api.post("/workshop/parts/", formData);
+        const { data } = await api.post("/workshop/parts/", formData);
+        savedPart = data;
+        const initialQuantity = asDecimal(form.initial_stock_quantity);
+        if (initialQuantity > 0) {
+          await api.post(`/workshop/parts/${savedPart.id}/adjust_stock/`, {
+            movement_type: "purchase",
+            quantity: initialQuantity.toFixed(2),
+            unit_cost: form.initial_stock_unit_cost || form.cost_price || "0.00",
+            notes: form.initial_stock_notes || "Entrada inicial no cadastro da peça",
+          });
+        }
       }
       setShow(false);
       await loadBrandOptions(form.brand || "");
@@ -271,7 +314,7 @@ export default function PartsPage() {
   }
 
   return <>
-    <PageHeader title="Peças e estoque" subtitle="Cadastro de peças com categoria pesquisável, marca com autocomplete, preço, estoque e mínimo.">
+    <PageHeader title="Peças e estoque" subtitle="Cadastro de peças com categoria pesquisável, marca com autocomplete e estoque movimentado por entradas, compras, ajustes e consumo em OS.">
       <Button onClick={() => open()}>Nova peça</Button>
     </PageHeader>
 
@@ -409,7 +452,7 @@ export default function PartsPage() {
           <TabPanel activeKey={activeTab} eventKey="stock">
             <Card className="form-section-card">
               <Card.Body>
-                <div className="form-section-title">Estoque e formação de preço</div>
+                <div className="form-section-title">Formação de preço e entrada inicial</div>
                 <Row className="g-3">
                   <Col md={3}>
                     <Form.Label>Unidade</Form.Label>
@@ -426,14 +469,31 @@ export default function PartsPage() {
                     <Form.Label>Venda</Form.Label>
                     <MoneyInput value={form.sale_price} onChange={(value) => update({ sale_price: value })}/>
                   </Col>
-                  <Col md={3}>
-                    <Form.Label>Estoque</Form.Label>
-                    <IntegerInput step="0.01" value={form.stock_quantity} onChange={(event) => update({ stock_quantity: event.target.value })}/>
-                  </Col>
-                  <Col md={3}>
-                    <Form.Label>Mínimo</Form.Label>
-                    <IntegerInput step="0.01" value={form.minimum_stock} onChange={(event) => update({ minimum_stock: event.target.value })}/>
-                  </Col>
+                  {!editing && (
+                    <>
+                      <Col md={3}>
+                        <Form.Label>Entrada inicial</Form.Label>
+                        <IntegerInput step="0.01" min="0" value={form.initial_stock_quantity} onChange={(event) => update({ initial_stock_quantity: event.target.value })}/>
+                        <Form.Text>Opcional. Salva uma movimentação de entrada no estoque.</Form.Text>
+                      </Col>
+                      <Col md={3}>
+                        <Form.Label>Custo da entrada</Form.Label>
+                        <MoneyInput value={form.initial_stock_unit_cost || form.cost_price} onChange={(value) => update({ initial_stock_unit_cost: value })}/>
+                      </Col>
+                      <Col md={6}>
+                        <Form.Label>Observação da entrada</Form.Label>
+                        <Form.Control value={form.initial_stock_notes || ""} onChange={(event) => update({ initial_stock_notes: event.target.value })}/>
+                      </Col>
+                    </>
+                  )}
+                  {editing && (
+                    <Col md={6}>
+                      <div className="form-muted-box h-100">
+                        <div className="fw-semibold mb-1">Estoque por movimentação</div>
+                        <div className="text-muted small">Para alterar estoque de peça existente, use o botão <strong>Estoque</strong> na listagem. O cadastro não edita saldo nem mínimo diretamente.</div>
+                      </div>
+                    </Col>
+                  )}
                 </Row>
               </Card.Body>
             </Card>

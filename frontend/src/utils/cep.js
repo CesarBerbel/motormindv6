@@ -1,6 +1,8 @@
 import api from "../api/client";
 import { onlyDigits, maskCep } from "../workshopOptions";
 
+const CEP_NOT_FOUND_MESSAGE = "Não encontrei esse CEP. Confira os 8 dígitos ou preencha o endereço manualmente.";
+
 function normalizeCepPayload(data, digits) {
   return {
     zip_code: maskCep(data?.zip_code || data?.cep || digits),
@@ -14,10 +16,12 @@ function normalizeCepPayload(data, digits) {
 
 function friendlyCepError(error) {
   const data = error?.response?.data;
+  if (error?.message === "CEP_NOT_FOUND") return CEP_NOT_FOUND_MESSAGE;
+  if (error?.response?.status === 404) return data?.detail || CEP_NOT_FOUND_MESSAGE;
   if (data?.cep) return Array.isArray(data.cep) ? data.cep.join(" ") : data.cep;
   if (data?.detail) return data.detail;
-  if (error?.message) return error.message;
-  return "Não foi possível buscar o CEP.";
+  if (error?.message && !String(error.message).includes("Request failed")) return error.message;
+  return "Não foi possível buscar o CEP agora. Preencha o endereço manualmente ou tente novamente em instantes.";
 }
 
 export async function lookupCep(cep) {
@@ -30,15 +34,14 @@ export async function lookupCep(cep) {
     const { data } = await api.get("/workshop/cep/", { params: { cep: digits } });
     return normalizeCepPayload(data, digits);
   } catch (backendError) {
-    // Fallback mantém a busca funcionando em desenvolvimento quando o backend estiver antigo,
-    // mas em produção o caminho preferencial é o proxy autenticado /api/workshop/cep/.
     try {
       const response = await fetch(`https://viacep.com.br/ws/${digits}/json/`);
-      if (!response.ok) throw new Error("Não foi possível consultar o CEP. Tente novamente.");
+      if (!response.ok) throw backendError;
       const data = await response.json();
-      if (data.erro) throw new Error("CEP não encontrado na base pública ViaCEP.");
+      if (data.erro) throw new Error("CEP_NOT_FOUND");
       return normalizeCepPayload(data, digits);
-    } catch {
+    } catch (fallbackError) {
+      if (fallbackError?.message === "CEP_NOT_FOUND") throw new Error(CEP_NOT_FOUND_MESSAGE);
       throw new Error(friendlyCepError(backendError));
     }
   }

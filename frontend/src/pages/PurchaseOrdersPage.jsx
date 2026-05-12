@@ -15,7 +15,6 @@ import MoneyInput from "../components/MoneyInput";
 import PageHeader from "../components/PageHeader";
 import SearchableSelect from "../components/SearchableSelect";
 import SearchAutocompleteInput from "../components/SearchAutocompleteInput";
-import { buildSearchSuggestions } from "../utils/search";
 import { dateInputValue, money } from "../workshopOptions";
 import { confirmDialog } from "../components/ConfirmDialog";
 
@@ -27,6 +26,7 @@ const statusOptions = [
   ["ordered", "Pedido enviado"],
   ["partially_received", "Recebido parcial"],
   ["received", "Recebido"],
+  ["returned", "Devolvido"],
   ["cancelled", "Cancelado"],
 ];
 
@@ -37,12 +37,13 @@ const statusVariant = {
   ordered: "warning",
   partially_received: "warning",
   received: "success",
+  returned: "dark",
   cancelled: "danger",
 };
 
 const orderTabs = [
-  { key: "document", label: "Documento", description: "Fornecedor, prazo e desconto" },
-  { key: "items", label: "Itens", description: "Peças, quantidades e custos" },
+  { key: "document", label: "Documento", description: "Fornecedor e prazo" },
+  { key: "items", label: "Itens", description: "Peças, quantidades, custos e desconto" },
   { key: "notes", label: "Observações", description: "Notas internas e origem" },
 ];
 
@@ -69,6 +70,31 @@ function asNumber(value) {
   const normalized = text.includes(",") ? text.replace(/\./g, "").replace(",", ".") : text;
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function isPurchaseOrderLocked(order) {
+  return ["received", "returned"].includes(order?.status);
+}
+
+function purchaseOrderSearchSuggestion(order) {
+  const itemSummary = (order.items || []).map((line) => line.description).filter(Boolean).join(" • ");
+  const status = order.status_label || order.status;
+  const supplier = order.supplier_name || "Sem fornecedor";
+  const origin = order.origin_label || "Manual";
+  const title = [order.number, supplier].filter(Boolean).join(" - ");
+  return {
+    key: order.id,
+    label: title,
+    value: order.number || title,
+    description: [status, origin, order.work_order_number ? `OS ${order.work_order_number}` : "", `Total: ${money(order.total_amount)}`].filter(Boolean).join(" • "),
+    meta: [itemSummary, order.account_payable_number ? `CP ${order.account_payable_number}` : "", order.notes].filter(Boolean).join(" • "),
+    payload: order,
+    searchText: [order.number, supplier, status, origin, order.work_order_number, order.account_payable_number, itemSummary, order.notes].filter(Boolean).join(" "),
+  };
+}
+
+function buildPurchaseOrderSearchSuggestions(orders) {
+  return (orders || []).map(purchaseOrderSearchSuggestion);
 }
 
 export default function PurchaseOrdersPage() {
@@ -123,6 +149,18 @@ export default function PurchaseOrdersPage() {
     load({ search: "", statusFilter: "" });
   }
 
+  function selectPurchaseOrderSuggestion(suggestion, nextValue) {
+    const selectedOrder = suggestion?.payload;
+    setSearch(nextValue || "");
+
+    if (selectedOrder?.id) {
+      setItems([selectedOrder]);
+      return;
+    }
+
+    load({ search: nextValue || "", statusFilter });
+  }
+
   const cards = useMemo(() => {
     const counts = dashboard?.counts || {};
     return [
@@ -165,6 +203,10 @@ export default function PurchaseOrdersPage() {
   }
 
   function open(item = null) {
+    if (isPurchaseOrderLocked(item)) {
+      setError("Pedido recebido ou devolvido não pode ser editado.");
+      return;
+    }
     setEditing(item);
     setActiveTab("document");
     setForm(item ? {
@@ -238,6 +280,15 @@ export default function PurchaseOrdersPage() {
   }
 
   function openStatus(item) {
+    if (item.status === "received") {
+      setStatusModal(item);
+      setNewStatus("returned");
+      return;
+    }
+    if (item.status === "returned") {
+      setError("Pedido devolvido não pode ter status alterado.");
+      return;
+    }
     setStatusModal(item);
     setNewStatus(item.status === "draft" ? "requested" : item.status);
   }
@@ -277,7 +328,23 @@ export default function PurchaseOrdersPage() {
     }
   }
 
+  async function returnOrder(item) {
+    if (!(await confirmDialog(`Devolver pedido ${item.number} e estornar as entradas de estoque?`))) return;
+    try {
+      await api.post(`/purchasing/purchase-orders/${item.id}/return/`, {
+        notes: `Devolução registrada pela tela de pedidos de compra.`,
+      });
+      await load();
+    } catch (err) {
+      setError(apiError(err));
+    }
+  }
+
   async function remove(item) {
+    if (isPurchaseOrderLocked(item)) {
+      setError("Pedido recebido ou devolvido não pode ser excluído.");
+      return;
+    }
     if (!(await confirmDialog(`Excluir pedido ${item.number}?`))) return;
     try {
       await api.delete(`/purchasing/purchase-orders/${item.id}/`);
@@ -316,8 +383,9 @@ export default function PurchaseOrdersPage() {
               placeholder="Buscar por pedido, fornecedor, OS ou item"
               value={search}
               onChange={setSearch}
-              onSearch={load}
-              suggestions={buildSearchSuggestions(items, ["number", "supplier_name", "work_order_number", "status_label", (order) => (order.items || []).map((line) => line.description)])}
+              onSearch={(value) => load({ search: value, statusFilter })}
+              onSelect={selectPurchaseOrderSuggestion}
+              suggestions={buildPurchaseOrderSearchSuggestions(items)}
             />
           </Col>
           <Col md={3}>
@@ -364,11 +432,14 @@ export default function PurchaseOrdersPage() {
                   <td><Badge bg={statusVariant[item.status] || "secondary"}>{item.status_label}</Badge></td>
                   <td>{item.account_payable_number ? <Link to="/finance/accounts-payable">{item.account_payable_number}</Link> : "-"}</td>
                   <td>{(item.items || []).length}</td>
-                  <td className="text-end">
-                    <Button size="sm" variant="outline-primary" className="me-2" onClick={() => open(item)}>Editar</Button>
-                    <Button size="sm" variant="outline-secondary" className="me-2" onClick={() => openStatus(item)}>Status</Button>
-                    {item.status !== "received" && item.status !== "cancelled" && <Button size="sm" variant="outline-success" className="me-2" onClick={() => openReceive(item)}>Receber</Button>}
-                    <Button size="sm" variant="outline-danger" onClick={() => remove(item)}>Excluir</Button>
+                  <td className="text-end text-nowrap">
+                    {item.status === "received" ? <Button size="sm" variant="outline-warning" className="me-2" onClick={() => returnOrder(item)}>Devolução</Button> : null}
+                    {!isPurchaseOrderLocked(item) ? <>
+                      <Button size="sm" variant="outline-primary" className="me-2" onClick={() => open(item)}>Editar</Button>
+                      <Button size="sm" variant="outline-secondary" className="me-2" onClick={() => openStatus(item)}>Status</Button>
+                      {item.status !== "cancelled" && <Button size="sm" variant="outline-success" className="me-2" onClick={() => openReceive(item)}>Receber</Button>}
+                      <Button size="sm" variant="outline-danger" onClick={() => remove(item)}>Excluir</Button>
+                    </> : null}
                   </td>
                 </tr>
               ))}
@@ -409,11 +480,7 @@ export default function PurchaseOrdersPage() {
                     <Form.Label>Previsão de entrega</Form.Label>
                     <DateInput value={form.expected_at || ""} onChange={(event) => updateForm({ expected_at: event.target.value })} />
                   </Col>
-                  <Col md={2}>
-                    <Form.Label>Desconto</Form.Label>
-                    <MoneyInput value={form.discount_amount} onChange={(value) => updateForm({ discount_amount: value })} />
-                  </Col>
-                  <Col md={2}>
+                  <Col md={4}>
                     <div className="finance-total-box total h-100">
                       <span>Total manual</span>
                       <strong>{money(manualItemsTotal.total)}</strong>
@@ -528,6 +595,22 @@ export default function PurchaseOrdersPage() {
                     </Card.Body>
                   </Card>
                 ) : null}
+
+                <Row className="g-3 mt-3 align-items-end">
+                  <Col md={3}>
+                    <Form.Label>Desconto do pedido</Form.Label>
+                    <MoneyInput value={form.discount_amount} onChange={(value) => updateForm({ discount_amount: value })} />
+                  </Col>
+                  <Col md={3}>
+                    <div className="finance-total-box h-100"><span>Subtotal manual</span><strong>{money(manualItemsTotal.subtotal)}</strong></div>
+                  </Col>
+                  <Col md={3}>
+                    <div className="finance-total-box h-100"><span>Desconto</span><strong>{money(manualItemsTotal.discount)}</strong></div>
+                  </Col>
+                  <Col md={3}>
+                    <div className="finance-total-box total h-100"><span>Total manual</span><strong>{money(manualItemsTotal.total)}</strong></div>
+                  </Col>
+                </Row>
               </Card.Body>
             </Card>
           </TabPanel>
@@ -579,11 +662,13 @@ export default function PurchaseOrdersPage() {
               <div className="form-section-title">Fluxo do pedido</div>
               <Form.Label>Novo status</Form.Label>
               <Form.Select value={newStatus} onChange={(event) => setNewStatus(event.target.value)}>
-                {statusOptions.filter(([value]) => value).map(([value, label]) => (
-                  <option key={value} value={value} disabled={value === "approved" && !canApprove}>
-                    {label}{value === "approved" && !canApprove ? " - exige financeiro/administrativo" : ""}
-                  </option>
-                ))}
+                {statusOptions
+                  .filter(([value]) => value && (statusModal?.status === "received" ? value === "returned" : value !== "returned"))
+                  .map(([value, label]) => (
+                    <option key={value} value={value} disabled={value === "approved" && !canApprove}>
+                      {label}{value === "approved" && !canApprove ? " - exige financeiro/administrativo" : ""}
+                    </option>
+                  ))}
               </Form.Select>
               {newStatus === "approved" ? (
                 <div className="small text-muted mt-2">

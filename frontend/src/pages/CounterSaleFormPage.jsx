@@ -4,6 +4,7 @@ import DateInput from "../components/DateInput";
 import IntegerInput from "../components/IntegerInput";
 import { Link, useNavigate } from "react-router-dom";
 import api, { apiError, results } from "../api/client";
+import { makeLocalId } from "../utils/localId";
 import AreaTabs from "../components/AreaTabs";
 import ErrorAlert from "../components/ErrorAlert";
 import FormTabs, { TabPanel } from "../components/FormTabs";
@@ -14,7 +15,7 @@ import { dateInputValue, money, paymentMethods } from "../workshopOptions";
 
 const today = () => dateInputValue();
 const emptySale = () => ({ customer_id: "", customer_name: "Cliente balcão", due_date: today(), discount_amount: "", notes: "", items: [] });
-const emptyLine = () => ({ local_id: crypto.randomUUID(), part_id: "", description: "", quantity: "", unit_price: "", cost_price: "", discount_amount: "", notes: "" });
+const emptyLine = () => ({ local_id: makeLocalId(), part_id: "", description: "", quantity: "", unit_price: "", cost_price: "", discount_amount: "", notes: "" });
 const emptyPayment = () => ({ receive_now: false, payment_amount: "", payment_method: "cash", payment_reference: "", payment_notes: "" });
 
 function decimal(value) {

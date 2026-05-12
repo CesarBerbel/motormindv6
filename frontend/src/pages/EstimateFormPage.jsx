@@ -4,6 +4,7 @@ import DateInput from "../components/DateInput";
 import IntegerInput from "../components/IntegerInput";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import api, { apiError, results } from "../api/client";
+import { makeLocalId } from "../utils/localId";
 import AreaTabs from "../components/AreaTabs";
 import AIAssistButton from "../components/AIAssistButton";
 import ErrorAlert from "../components/ErrorAlert";
@@ -17,8 +18,8 @@ import { dateInputValue, fuelTankLevelOptions, maskCpfCnpj, money, normalizePart
 import { normalizeBrazilPhoneToE164 } from "../utils/phone";
 
 const emptyEstimate = () => ({ customer_id: "", vehicle_id: "", title: "", complaint: "", diagnosis: "", internal_notes: "", customer_notes: "", valid_until: dateInputValue(), tank_level_percent: "0", discount_amount: "", services: [], parts: [] });
-const emptyService = () => ({ local_id: crypto.randomUUID(), service_id: "", description: "", quantity: "1.00", unit_price: "", discount_amount: "0.00", notes: "" });
-const emptyPart = () => ({ local_id: crypto.randomUUID(), service_local_id: "", part_id: "", description: "", quantity: "1.00", unit_price: "", cost_price: "", discount_amount: "0.00", notes: "" });
+const emptyService = () => ({ local_id: makeLocalId(), service_id: "", description: "", quantity: "1.00", unit_price: "", discount_amount: "0.00", notes: "" });
+const emptyPart = () => ({ local_id: makeLocalId(), service_local_id: "", part_id: "", description: "", quantity: "1.00", unit_price: "", cost_price: "", discount_amount: "0.00", notes: "" });
 const emptyQuickCustomerVehicle = () => ({
   person_type: "individual",
   first_name: "",
@@ -67,8 +68,9 @@ const emptyQuickPart = () => ({
   unit: "un",
   cost_price: "0.00",
   sale_price: "0.00",
-  stock_quantity: "0.00",
-  minimum_stock: "0.00",
+  initial_stock_quantity: "0.00",
+  initial_stock_unit_cost: "0.00",
+  initial_stock_notes: "Entrada inicial pela peça rápida",
   is_featured: false,
   is_active: true,
   notes: "",
@@ -84,7 +86,7 @@ const emptyQuickPackage = () => ({
 });
 
 const emptyQuickPackageItem = () => ({
-  local_id: crypto.randomUUID(),
+  local_id: makeLocalId(),
   service_id: "",
   description: "",
   quantity: "1.00",
@@ -106,7 +108,7 @@ const quickServiceTabs = [
 
 const quickPartTabs = [
   { key: "identification", label: "Identificação", description: "SKU, peça e categoria" },
-  { key: "stock", label: "Estoque", description: "Unidade, preços e mínimo" },
+  { key: "stock", label: "Preço e entrada", description: "Unidade, preços e entrada inicial" },
   { key: "review", label: "Revisão", description: "Confirmar peça" },
 ];
 
@@ -812,11 +814,23 @@ function QuickPartModal({ show, onHide, onCreated, categories, serviceLineOption
 
   useEffect(() => {
     if (!show) return;
+    let cancelled = false;
     const firstRealService = (serviceLineOptions || []).find((option) => option.value);
-    setForm({ ...emptyQuickPart(), service_local_id: firstRealService?.value || "" });
+    async function prepareForm() {
+      let nextSku = "";
+      try {
+        const { data } = await api.get("/workshop/parts/next-sku/");
+        nextSku = data?.sku || "";
+      } catch {
+        nextSku = "";
+      }
+      if (!cancelled) setForm({ ...emptyQuickPart(), sku: nextSku, service_local_id: firstRealService?.value || "" });
+    }
+    prepareForm();
     setActiveTab("identification");
     setError("");
     setSaving(false);
+    return () => { cancelled = true; };
   }, [show, serviceLineOptions]);
 
   function update(patch) {
@@ -824,11 +838,7 @@ function QuickPartModal({ show, onHide, onCreated, categories, serviceLineOption
   }
 
   function validate() {
-    if (!form.sku.trim()) {
-      setActiveTab("identification");
-      setError("Informe o SKU/código interno da peça.");
-      return false;
-    }
+    // O SKU vem preenchido automaticamente. Caso falhe, o backend também gera um código ao salvar.
     if (!form.name.trim()) {
       setActiveTab("identification");
       setError("Informe o nome da peça.");
@@ -858,13 +868,19 @@ function QuickPartModal({ show, onHide, onCreated, categories, serviceLineOption
         unit: normalizePartUnit(form.unit),
         cost_price: form.cost_price || "0.00",
         sale_price: form.sale_price || "0.00",
-        stock_quantity: form.stock_quantity || "0.00",
-        minimum_stock: form.minimum_stock || "0.00",
         is_featured: !!form.is_featured,
         is_active: !!form.is_active,
         notes: form.notes.trim(),
       };
       const { data } = await api.post("/workshop/parts/", payload);
+      if (decimal(form.initial_stock_quantity) > 0) {
+        await api.post(`/workshop/parts/${data.id}/adjust_stock/`, {
+          movement_type: "purchase",
+          quantity: Number(decimal(form.initial_stock_quantity)).toFixed(2),
+          unit_cost: form.initial_stock_unit_cost || form.cost_price || "0.00",
+          notes: form.initial_stock_notes || "Entrada inicial pela peça rápida",
+        });
+      }
       onCreated(data, form.service_local_id || "");
       onHide();
     } catch (err) {
@@ -882,7 +898,7 @@ function QuickPartModal({ show, onHide, onCreated, categories, serviceLineOption
         </Modal.Header>
         <Modal.Body>
           <Alert variant="info" className="mb-3">
-            Cadastre uma peça sem sair do orçamento. Ao salvar, ela será incluída no estoque/catálogo e adicionada ao orçamento atual.
+            Cadastre uma peça sem sair do orçamento. A entrada inicial, quando informada, será registrada por movimentação de estoque.
           </Alert>
           <ErrorAlert error={error} onClose={() => setError("")} />
           <FormTabs tabs={quickPartTabs} activeKey={activeTab} onSelect={setActiveTab} />
@@ -943,7 +959,7 @@ function QuickPartModal({ show, onHide, onCreated, categories, serviceLineOption
           <TabPanel activeKey={activeTab} eventKey="stock">
             <Card className="form-section-card">
               <Card.Body>
-                <div className="form-section-title">Estoque e preços</div>
+                <div className="form-section-title">Preço e entrada inicial</div>
                 <Row className="g-3">
                   <Col md={4}>
                     <Form.Label>Unidade</Form.Label>
@@ -960,15 +976,20 @@ function QuickPartModal({ show, onHide, onCreated, categories, serviceLineOption
                     <MoneyInput value={form.sale_price} onChange={(value) => update({ sale_price: value })} />
                   </Col>
                   <Col md={4}>
-                    <Form.Label>Estoque atual</Form.Label>
-                    <IntegerInput step="0.01" value={form.stock_quantity} onChange={(event) => update({ stock_quantity: event.target.value })} />
+                    <Form.Label>Entrada inicial</Form.Label>
+                    <IntegerInput min="0" step="0.01" value={form.initial_stock_quantity} onChange={(event) => update({ initial_stock_quantity: event.target.value })} />
+                    <Form.Text>Opcional. Cria um movimento de entrada no estoque.</Form.Text>
                   </Col>
                   <Col md={4}>
-                    <Form.Label>Estoque mínimo</Form.Label>
-                    <IntegerInput min="0" step="0.01" value={form.minimum_stock} onChange={(event) => update({ minimum_stock: event.target.value })} />
+                    <Form.Label>Custo da entrada</Form.Label>
+                    <MoneyInput value={form.initial_stock_unit_cost || form.cost_price} onChange={(value) => update({ initial_stock_unit_cost: value })} />
                   </Col>
                   <Col md={4}>
                     <Form.Check className="mt-4" label="Peça preferida/mais usada" checked={form.is_featured} onChange={(event) => update({ is_featured: event.target.checked })} />
+                  </Col>
+                  <Col md={12}>
+                    <Form.Label>Observação da entrada</Form.Label>
+                    <Form.Control value={form.initial_stock_notes} onChange={(event) => update({ initial_stock_notes: event.target.value })} />
                   </Col>
                   <Col md={12}>
                     <Form.Label>Observações internas da peça</Form.Label>
@@ -988,11 +1009,11 @@ function QuickPartModal({ show, onHide, onCreated, categories, serviceLineOption
                   <div className="small text-muted mt-2">Categoria: {categoryOptions.find((option) => String(option.value) === String(form.category_id))?.label || "Sem categoria"}</div>
                   <div className="small text-muted">Marca: {form.brand || "Sem marca"}</div>
                   <div className="small text-muted">Serviço vinculado: {serviceLineOptions.find((option) => String(option.value) === String(form.service_local_id))?.label || "Sem vínculo"}</div>
-                  <div className="small text-muted">Estoque: {form.stock_quantity || "0.00"} {normalizePartUnit(form.unit)}</div>
+                  <div className="small text-muted">Entrada inicial: {form.initial_stock_quantity || "0.00"} {normalizePartUnit(form.unit)}</div>
                   <div className="small text-muted">Custo: {money(form.cost_price || 0)} · Venda: {money(form.sale_price || 0)}</div>
                 </div>
                 <Alert variant="warning" className="mt-3 mb-0">
-                  A peça será criada no catálogo/estoque e também será adicionada ao orçamento atual como item de peça.
+                  A peça será criada no catálogo e adicionada ao orçamento atual. A entrada inicial será lançada como movimentação de estoque.
                 </Alert>
               </Card.Body>
             </Card>
@@ -1638,8 +1659,8 @@ export default function EstimateFormPage({ embedded = false }) {
           valid_until: data.valid_until || dateInputValue(),
           tank_level_percent: String(data.tank_level_percent ?? 0),
           discount_amount: data.discount_amount || "0.00",
-          services: (data.services || []).map((line) => ({ ...line, local_id: String(line.id || crypto.randomUUID()), service_id: line.service || line.service_id || "", source_package_id: line.source_package || line.source_package_id || "", source_package_name: line.source_package_name || "", quantity: line.quantity || "1.00", unit_price: line.unit_price || "0.00", discount_amount: line.discount_amount || "0.00" })),
-          parts: (data.parts || []).map((line) => ({ ...line, local_id: String(line.id || crypto.randomUUID()), service_local_id: line.service_item ? String(line.service_item) : "", part_id: line.part || line.part_id || "", quantity: line.quantity || "1.00", unit_price: line.unit_price || "0.00", cost_price: line.cost_price || "0.00", discount_amount: line.discount_amount || "0.00" })),
+          services: (data.services || []).map((line) => ({ ...line, local_id: String(line.id || makeLocalId()), service_id: line.service || line.service_id || "", source_package_id: line.source_package || line.source_package_id || "", source_package_name: line.source_package_name || "", quantity: line.quantity || "1.00", unit_price: line.unit_price || "0.00", discount_amount: line.discount_amount || "0.00" })),
+          parts: (data.parts || []).map((line) => ({ ...line, local_id: String(line.id || makeLocalId()), service_local_id: line.service_item ? String(line.service_item) : "", part_id: line.part || line.part_id || "", quantity: line.quantity || "1.00", unit_price: line.unit_price || "0.00", cost_price: line.cost_price || "0.00", discount_amount: line.discount_amount || "0.00" })),
         });
       } else {
         setForm(emptyEstimate());
