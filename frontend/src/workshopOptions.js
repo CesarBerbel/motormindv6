@@ -29,6 +29,12 @@ export function formatMoneyInput(value) {
   return money(value);
 }
 
+export function formatMoneyEditingValue(value) {
+  if (value === "" || value === null || value === undefined) return "";
+  const parsed = decimalNumber(value);
+  return parsed.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 export function parseMoneyInput(value) {
   const raw = String(value ?? "").trim();
   if (!raw) return "";

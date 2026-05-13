@@ -52,6 +52,9 @@ class CustomerApprovalPublicView(APIView):
             description=f"Cliente {decision_label} digitalmente o documento {approval.document_type_label}.",
             data={"approval_id": approval.id, "token": str(approval.token), "decision": approval.status, "decision_name": approval.decision_name},
         )
+        if approval.status == WorkOrderCustomerApproval.Status.APPROVED and not approval.work_order.approved_at:
+            approval.work_order.approved_at = timezone.now()
+            approval.work_order.save(update_fields=["approved_at", "updated_at"])
         target_status = WorkOrder.Status.OPEN if approval.status == WorkOrderCustomerApproval.Status.APPROVED else WorkOrder.Status.COMPLETED
         try:
             change_work_order_status(

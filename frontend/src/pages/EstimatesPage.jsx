@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Badge, Button, Card, Col, Form, Row, Table } from "react-bootstrap";
+import { Badge, Button, Card, Col, Form, Modal, Row, Table } from "react-bootstrap";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import api, { apiError, apiUrl, results } from "../api/client";
 import AreaTabs from "../components/AreaTabs";
@@ -12,6 +12,7 @@ import { buildReturnToState } from "../utils/returnTo";
 
 const statusOptions = [["", "Todos"], ...estimateStatuses];
 const statusVariant = { open: "secondary", diagnosis: "info", awaiting_approval: "warning", approved: "success", partially_approved: "success", rejected: "danger", expired: "warning", converted: "primary", cancelled: "dark" };
+const cancellableStatuses = new Set(["open", "diagnosis", "awaiting_approval", "rejected", "expired"]);
 
 function buildEstimateSearchSuggestions(items) {
   return (items || []).map((item) => {
@@ -42,6 +43,8 @@ export default function EstimatesPage() {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
+  const [cancelTarget, setCancelTarget] = useState(null);
+  const [cancelForm, setCancelForm] = useState({ reason: "", send_notifications: true });
   const searchSuggestions = useMemo(() => buildEstimateSearchSuggestions(items), [items]);
 
   async function load(nextSearch = search, nextStatus = status) {
@@ -91,6 +94,24 @@ export default function EstimatesPage() {
     }
   }
 
+  function openCancel(item) {
+    setCancelTarget(item);
+    setCancelForm({ reason: "", send_notifications: true });
+  }
+
+  async function submitCancel(event) {
+    event.preventDefault();
+    if (!cancelTarget) return;
+    try {
+      await api.post(`/attendance/estimates/${cancelTarget.id}/cancel/`, cancelForm);
+      setCancelTarget(null);
+      setCancelForm({ reason: "", send_notifications: true });
+      await load();
+    } catch (err) {
+      setError(apiError(err));
+    }
+  }
+
   function onSearch(nextValue) {
     setSearch(nextValue);
     load(nextValue);
@@ -110,7 +131,23 @@ export default function EstimatesPage() {
     <Card className="border-0 shadow-sm mb-3"><Card.Body><Row className="g-2"><Col md={5}><SearchAutocompleteInput placeholder="Buscar orçamento, cliente, placa ou descrição" value={search} onChange={setSearch} onSearch={onSearch} suggestions={searchSuggestions} /></Col><Col md={3}><Form.Select value={status} onChange={(event) => setStatus(event.target.value)}>{statusOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</Form.Select></Col><Col md={2}><Button variant="outline-primary" className="w-100" onClick={() => load()}>Buscar</Button></Col><Col md={2}><Button variant="outline-secondary" className="w-100" onClick={clearSearch} disabled={!search && !status}>Limpar pesquisa</Button></Col></Row></Card.Body></Card>
 
     <Card className="border-0 shadow-sm"><Card.Body className="p-0">
-      {items.length === 0 ? <EmptyState /> : <Table responsive hover className="mb-0"><thead><tr><th>Número</th><th>Cliente</th><th>Veículo</th><th>Total</th><th>Validade</th><th>Status</th><th></th></tr></thead><tbody>{items.map((item) => <tr key={item.id}><td className="fw-semibold">{item.number}</td><td>{item.customer_name}</td><td>{item.vehicle_display}</td><td>{money(item.total_amount)}</td><td>{formatDate(item.valid_until)}</td><td><Badge bg={statusVariant[item.status] || "secondary"}>{item.status_label}</Badge></td><td className="text-end"><Button size="sm" variant="outline-secondary" className="me-2" onClick={() => navigate(`/attendance/estimates/${item.id}/edit`, { state: returnState })}>Editar</Button><Button as="a" size="sm" variant="outline-dark" className="me-2" href={apiUrl(`/attendance/estimates/${item.id}/document/`)} target="_blank" rel="noreferrer">PDF</Button>{["open"].includes(item.status) && <Button size="sm" variant="outline-info" className="me-2" onClick={() => changeStatus(item, "diagnosis")}>Diagnóstico</Button>}{["open", "diagnosis", "awaiting_approval"].includes(item.status) && <Button size="sm" variant="outline-warning" className="me-2" onClick={() => sendCustomerApproval(item)}>Enviar aprovação</Button>}{["approved", "partially_approved"].includes(item.status) && <Button size="sm" className="me-2" onClick={() => convert(item)}>Converter em OS</Button>}{item.converted_work_order && <Link className="btn btn-sm btn-outline-primary" to={`/work-orders/${item.converted_work_order}`} state={returnState}>Abrir OS</Link>}</td></tr>)}</tbody></Table>}
+      {items.length === 0 ? <EmptyState /> : <Table responsive hover className="mb-0"><thead><tr><th>Número</th><th>Cliente</th><th>Veículo</th><th>Total</th><th>Validade</th><th>Status</th><th></th></tr></thead><tbody>{items.map((item) => <tr key={item.id}><td className="fw-semibold">{item.number}</td><td>{item.customer_name}</td><td>{item.vehicle_display}</td><td>{money(item.total_amount)}</td><td>{formatDate(item.valid_until)}</td><td><Badge bg={statusVariant[item.status] || "secondary"}>{item.status_label}</Badge></td><td className="text-end"><Button size="sm" variant="outline-secondary" className="me-2" onClick={() => navigate(`/attendance/estimates/${item.id}/edit`, { state: returnState })}>{item.can_edit === false ? "Abrir" : "Editar"}</Button><Button as="a" size="sm" variant="outline-dark" className="me-2" href={apiUrl(`/attendance/estimates/${item.id}/document/`)} target="_blank" rel="noreferrer">PDF</Button>{["open"].includes(item.status) && <Button size="sm" variant="outline-info" className="me-2" onClick={() => changeStatus(item, "diagnosis")}>Diagnóstico</Button>}{["open", "diagnosis", "awaiting_approval"].includes(item.status) && <Button size="sm" variant="outline-warning" className="me-2" onClick={() => sendCustomerApproval(item)}>Enviar aprovação</Button>}{["approved", "partially_approved"].includes(item.status) && <Button size="sm" className="me-2" onClick={() => convert(item)}>Converter em OS</Button>}{cancellableStatuses.has(item.status) && <Button size="sm" variant="outline-danger" className="me-2" onClick={() => openCancel(item)}>Cancelar</Button>}{item.converted_work_order && <Link className="btn btn-sm btn-outline-primary" to={`/work-orders/${item.converted_work_order}`} state={returnState}>Abrir OS</Link>}</td></tr>)}</tbody></Table>}
     </Card.Body></Card>
+
+    <Modal show={!!cancelTarget} onHide={() => setCancelTarget(null)} centered>
+      <Form onSubmit={submitCancel}>
+        <Modal.Header closeButton><Modal.Title>Cancelar orçamento {cancelTarget?.number ? `- ${cancelTarget.number}` : ""}</Modal.Title></Modal.Header>
+        <Modal.Body>
+          <p className="text-muted small mb-3">A justificativa será gravada no orçamento e usada para auditoria do cancelamento.</p>
+          <Form.Label>Justificativa</Form.Label>
+          <Form.Control required minLength={5} as="textarea" rows={4} value={cancelForm.reason} onChange={(event) => setCancelForm({ ...cancelForm, reason: event.target.value })} placeholder="Ex.: Cliente recusou o orçamento." />
+          <Form.Check className="mt-3" label="Disparar notificações automáticas de cancelamento" checked={cancelForm.send_notifications} onChange={(event) => setCancelForm({ ...cancelForm, send_notifications: event.target.checked })} />
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={() => setCancelTarget(null)}>Fechar</Button>
+          <Button variant="danger" type="submit">Confirmar cancelamento</Button>
+        </Modal.Footer>
+      </Form>
+    </Modal>
   </>;
 }

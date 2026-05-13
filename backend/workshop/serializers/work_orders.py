@@ -3,6 +3,52 @@ from .common import *
 from .catalog import PartSerializer, WorkshopServiceSerializer
 from .vehicles import VehicleSerializer
 
+
+
+WORK_ORDER_DIRECT_EDIT_STATUSES = {WorkOrder.Status.OPEN, WorkOrder.Status.IN_PROGRESS, WorkOrder.Status.WAITING_PARTS}
+
+
+def work_order_has_pending_approval(work_order):
+    if not getattr(work_order, "pk", None):
+        return False
+    return work_order.customer_approvals.filter(
+        status=WorkOrderCustomerApproval.Status.PENDING,
+        is_active=True,
+    ).exists()
+
+
+def work_order_requires_revision_estimate(work_order):
+    return bool(getattr(work_order, "approved_at", None))
+
+
+def work_order_can_be_edited_directly(work_order):
+    if not work_order:
+        return True
+    if work_order.status not in WORK_ORDER_DIRECT_EDIT_STATUSES:
+        return False
+    if work_order_has_pending_approval(work_order):
+        return False
+    if work_order_requires_revision_estimate(work_order):
+        return False
+    return True
+
+
+def validate_work_order_direct_edit_allowed(work_order):
+    if not work_order:
+        return
+    if work_order.status not in WORK_ORDER_DIRECT_EDIT_STATUSES:
+        raise serializers.ValidationError({
+            "status": "A OS só pode ser alterada quando estiver aberta, em execução ou aguardando peças."
+        })
+    if work_order_has_pending_approval(work_order):
+        raise serializers.ValidationError({
+            "status": "A OS está aguardando aprovação e não pode ser alterada. Aguarde a decisão do cliente ou cancele o link de aprovação."
+        })
+    if work_order_requires_revision_estimate(work_order):
+        raise serializers.ValidationError({
+            "status": "Esta OS já foi aprovada. Para alterar valores, serviços ou peças, gere um novo orçamento de revisão para aprovação do cliente."
+        })
+
 class WorkOrderServiceChecklistItemSerializer(serializers.ModelSerializer):
     photo_url = serializers.SerializerMethodField()
     completed_by_name = serializers.CharField(read_only=True)
@@ -167,6 +213,8 @@ class WorkOrderServiceSerializer(serializers.ModelSerializer):
         return f"{hours}h {remaining:02d}min" if hours else f"{remaining}min"
 
     def validate(self, attrs):
+        work_order = attrs.get("work_order", getattr(self.instance, "work_order", None))
+        validate_work_order_direct_edit_allowed(work_order)
         service = attrs.get("service")
         if service:
             attrs.setdefault("description", service.name)
@@ -236,6 +284,8 @@ class WorkOrderPartSerializer(serializers.ModelSerializer):
         return bool(obj.stock_consumed_at)
 
     def validate(self, attrs):
+        work_order = attrs.get("work_order", getattr(self.instance, "work_order", None))
+        validate_work_order_direct_edit_allowed(work_order)
         part = attrs.get("part")
         if part:
             attrs.setdefault("description", part.name)
@@ -428,6 +478,8 @@ class InitialWorkOrderServiceItemSerializer(serializers.Serializer):
     notes = serializers.CharField(required=False, allow_blank=True)
 
     def validate(self, attrs):
+        work_order = attrs.get("work_order", getattr(self.instance, "work_order", None))
+        validate_work_order_direct_edit_allowed(work_order)
         service = attrs.get("service")
         if service:
             attrs.setdefault("description", service.name)
@@ -440,6 +492,11 @@ class InitialWorkOrderServiceItemSerializer(serializers.Serializer):
         return attrs
 
 
+
+
+class CancelWorkOrderSerializer(serializers.Serializer):
+    reason = serializers.CharField(min_length=5, max_length=1000, trim_whitespace=True)
+    send_notifications = serializers.BooleanField(default=True)
 
 
 class WorkOrderSerializer(serializers.ModelSerializer):
@@ -461,11 +518,14 @@ class WorkOrderSerializer(serializers.ModelSerializer):
     account_receivable_summary = serializers.SerializerMethodField()
     purchase_orders_summary = serializers.SerializerMethodField()
     available_status_transitions = serializers.SerializerMethodField()
+    can_edit = serializers.SerializerMethodField()
+    has_pending_approval = serializers.SerializerMethodField()
+    requires_revision_estimate = serializers.SerializerMethodField()
 
     class Meta:
         model = WorkOrder
-        fields = ["id", "number", "customer", "customer_id", "customer_name", "vehicle", "vehicle_id", "vehicle_display", "title", "complaint", "diagnosis", "solution", "internal_notes", "customer_notes", "status", "status_label", "priority", "priority_label", "order_type", "order_type_label", "reference_work_order", "reference_work_order_id", "reference_work_order_number", "mileage_in", "mileage_out", "promised_at", "opened_at", "approved_at", "started_at", "completed_at", "delivered_at", "cancelled_at", "assigned_to", "assigned_to_id", "assigned_to_name", "subtotal_services", "subtotal_parts", "manual_discount_amount", "discount_total", "grand_total", "paid_total", "balance_due", "inventory_consumed_at", "account_receivable_summary", "purchase_orders_summary", "available_status_transitions", "created_at", "updated_at", "initial_service_items"]
-        read_only_fields = ["id", "number", "customer", "customer_name", "vehicle", "vehicle_display", "assigned_to", "assigned_to_name", "reference_work_order", "reference_work_order_number", "status", "status_label", "priority_label", "order_type_label", "opened_at", "approved_at", "started_at", "completed_at", "delivered_at", "cancelled_at", "subtotal_services", "subtotal_parts", "discount_total", "grand_total", "paid_total", "balance_due", "inventory_consumed_at", "account_receivable_summary", "purchase_orders_summary", "available_status_transitions", "created_at", "updated_at"]
+        fields = ["id", "number", "customer", "customer_id", "customer_name", "vehicle", "vehicle_id", "vehicle_display", "title", "complaint", "diagnosis", "solution", "internal_notes", "customer_notes", "status", "status_label", "priority", "priority_label", "order_type", "order_type_label", "reference_work_order", "reference_work_order_id", "reference_work_order_number", "mileage_in", "mileage_out", "promised_at", "opened_at", "approved_at", "started_at", "completed_at", "delivered_at", "cancelled_at", "cancelled_by", "cancellation_reason", "assigned_to", "assigned_to_id", "assigned_to_name", "subtotal_services", "subtotal_parts", "manual_discount_amount", "discount_total", "grand_total", "paid_total", "balance_due", "inventory_consumed_at", "account_receivable_summary", "purchase_orders_summary", "available_status_transitions", "can_edit", "has_pending_approval", "requires_revision_estimate", "created_at", "updated_at", "initial_service_items"]
+        read_only_fields = ["id", "number", "customer", "customer_name", "vehicle", "vehicle_display", "assigned_to", "assigned_to_name", "reference_work_order", "reference_work_order_number", "status", "status_label", "priority_label", "order_type_label", "opened_at", "approved_at", "started_at", "completed_at", "delivered_at", "cancelled_at", "cancelled_by", "cancellation_reason", "subtotal_services", "subtotal_parts", "discount_total", "grand_total", "paid_total", "balance_due", "inventory_consumed_at", "account_receivable_summary", "purchase_orders_summary", "available_status_transitions", "can_edit", "has_pending_approval", "requires_revision_estimate", "created_at", "updated_at"]
 
     def get_assigned_to_name(self, obj):
         return obj.assigned_to.get_full_name() or obj.assigned_to.username if obj.assigned_to else ""
@@ -509,6 +569,15 @@ class WorkOrderSerializer(serializers.ModelSerializer):
         actor = getattr(request, "user", None) if request else None
         return available_status_transitions(obj, actor=actor)
 
+    def get_can_edit(self, obj):
+        return work_order_can_be_edited_directly(obj)
+
+    def get_has_pending_approval(self, obj):
+        return work_order_has_pending_approval(obj)
+
+    def get_requires_revision_estimate(self, obj):
+        return work_order_requires_revision_estimate(obj)
+
     def _create_initial_service_items(self, work_order, items):
         for item in items:
             WorkOrderService.objects.create(work_order=work_order, status=WorkOrderService.Status.PENDING, **item)
@@ -532,12 +601,24 @@ class WorkOrderSerializer(serializers.ModelSerializer):
         return instance
 
     def validate(self, attrs):
+        if self.instance is not None:
+            validate_work_order_direct_edit_allowed(self.instance)
         customer = attrs.get("customer", getattr(self.instance, "customer", None))
         vehicle = attrs.get("vehicle", getattr(self.instance, "vehicle", None))
         order_type = attrs.get("order_type", getattr(self.instance, "order_type", WorkOrder.OrderType.STANDARD))
         reference_work_order = attrs.get("reference_work_order", getattr(self.instance, "reference_work_order", None))
         if vehicle and customer and vehicle.customer_id != customer.id:
             raise serializers.ValidationError({"vehicle_id": "O veiculo informado pertence a outro cliente."})
+        if self.instance is None and customer:
+            from attendance.models import Estimate
+            has_active_estimate = Estimate.objects.filter(
+                customer=customer,
+                status__in=[Estimate.Status.OPEN, Estimate.Status.DIAGNOSIS, Estimate.Status.AWAITING_APPROVAL],
+            ).exists()
+            if has_active_estimate:
+                raise serializers.ValidationError({
+                    "customer_id": "Este cliente já possui orçamento em andamento (aberto, em diagnóstico ou aguardando aprovação). Converta ou finalize o orçamento antes de abrir uma OS avulsa."
+                })
         if order_type == WorkOrder.OrderType.WARRANTY and not reference_work_order:
             raise serializers.ValidationError({"reference_work_order_id": "Informe a OS de referencia quando o tipo for garantia."})
         if reference_work_order:
@@ -560,7 +641,7 @@ class WorkOrderSerializer(serializers.ModelSerializer):
 
 class WorkOrderListSerializer(WorkOrderSerializer):
     class Meta(WorkOrderSerializer.Meta):
-        fields = ["id", "number", "customer_name", "vehicle_display", "title", "status", "status_label", "priority", "priority_label", "promised_at", "assigned_to_name", "grand_total", "paid_total", "balance_due", "available_status_transitions", "created_at", "updated_at"]
+        fields = ["id", "number", "customer_name", "vehicle_display", "title", "status", "status_label", "priority", "priority_label", "promised_at", "assigned_to_name", "grand_total", "paid_total", "balance_due", "available_status_transitions", "can_edit", "has_pending_approval", "requires_revision_estimate", "approved_at", "cancelled_at", "cancellation_reason", "created_at", "updated_at"]
         read_only_fields = fields
 
 
@@ -694,6 +775,28 @@ class WorkOrderCustomerApprovalCreateSerializer(serializers.Serializer):
     expires_days = serializers.IntegerField(required=False, min_value=1, max_value=90, default=7)
 
 
+
+
+class WorkOrderManualApprovalSerializer(serializers.Serializer):
+    approval_type = serializers.ChoiceField(choices=[("total", "Total"), ("partial", "Parcial")], default="total")
+    notes = serializers.CharField(required=True, allow_blank=False)
+    signature_name = serializers.CharField(required=False, allow_blank=True, max_length=180)
+    signature_document = serializers.CharField(required=False, allow_blank=True, max_length=30)
+
+    def validate_notes(self, value):
+        value = (value or "").strip()
+        if not value:
+            raise serializers.ValidationError("Informe uma observação para registrar a aprovação manual.")
+        return value
+
+    def validate_signature_document(self, value):
+        value = (value or "").strip()
+        if not value:
+            return value
+        digits = only_digits(value)
+        if len(digits) not in (11, 14):
+            raise serializers.ValidationError("Informe um CPF com 11 dígitos ou CNPJ com 14 dígitos.")
+        return format_cpf_cnpj(digits)
 
 
 class WorkOrderCustomerApprovalDecisionSerializer(serializers.Serializer):

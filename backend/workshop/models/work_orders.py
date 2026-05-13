@@ -10,6 +10,7 @@ class WorkOrder(TimeStampedModel):
         IN_PROGRESS = "in_progress", "Em execucao"
         WAITING_PARTS = "waiting_parts", "Aguardando pecas"
         COMPLETED = "completed", "Concluida"
+        CANCELLED = "cancelled", "Cancelada"
 
     class Priority(models.TextChoices):
         LOW = "low", "Baixa"
@@ -46,6 +47,8 @@ class WorkOrder(TimeStampedModel):
     completed_at = models.DateTimeField(null=True, blank=True)
     delivered_at = models.DateTimeField(null=True, blank=True)
     cancelled_at = models.DateTimeField(null=True, blank=True)
+    cancellation_reason = models.TextField(blank=True)
+    cancelled_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name="cancelled_work_orders")
     assigned_to = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name="assigned_work_orders")
     created_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name="created_work_orders")
     updated_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name="updated_work_orders")
@@ -533,6 +536,7 @@ class WorkOrderEvent(TimeStampedModel):
         CHECKLIST_UPDATED = "checklist_updated", "Checklist atualizado"
         DELIVERY_SIGNED = "delivery_signed", "Entrega assinada"
         NOTE = "note", "Nota"
+        CANCELLED = "cancelled", "Cancelada"
         ERROR = "error", "Erro"
 
     work_order = models.ForeignKey(WorkOrder, on_delete=models.CASCADE, related_name="events")

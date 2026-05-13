@@ -8,7 +8,7 @@ WORK_ORDER_PAYMENT_AUDIT_FIELDS = ["method", "amount", "paid_at", "reference", "
 
 class WorkOrderViewSet(viewsets.ModelViewSet):
     permission_classes = [HasViewPermission]
-    permission_code_map = {"read": "work_orders.view", "create": "work_orders.create", "update": "work_orders.edit", "partial_update": "work_orders.edit", "destroy": "work_orders.edit", "change_status": "work_orders.status", "technical_action": "technical.execute", "send_message": "messages.send", "recalculate": ["work_orders.edit", "payments.manage"], "trigger_notifications": "messages.send", "document": "work_orders.view", "customer_approvals": "work_orders.view", "create_customer_approval": "work_orders.edit", "delivery_signature": "work_orders.view", "create_delivery_signature": "work_orders.edit", "delivery_receipt": "work_orders.view"}
+    permission_code_map = {"read": "work_orders.view", "create": "work_orders.create", "update": "work_orders.edit", "partial_update": "work_orders.edit", "destroy": "work_orders.edit", "change_status": "work_orders.status", "cancel": "work_orders.status", "technical_action": "technical.execute", "send_message": "messages.send", "recalculate": ["work_orders.edit", "payments.manage"], "trigger_notifications": "messages.send", "document": "work_orders.view", "customer_approvals": "work_orders.view", "create_customer_approval": "work_orders.edit", "manual_approval": "work_orders.edit", "create_revision_estimate": "work_orders.edit", "delivery_signature": "work_orders.view", "create_delivery_signature": "work_orders.edit", "delivery_receipt": "work_orders.view"}
     queryset = WorkOrder.objects.select_related("customer", "vehicle", "assigned_to", "created_by", "updated_by").prefetch_related("services__service", "services__source_package", "services__checklist_items", "parts__part", "payments", "photos__uploaded_by", "events__actor", "messages__template", "messages__message_log")
 
     def get_serializer_class(self):
@@ -109,6 +109,21 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
             raise drf_validation_from_django(exc) from exc
         return Response({"work_order": WorkOrderDetailSerializer(updated).data, "work_order_message_ids": message_ids})
 
+    @action(detail=True, methods=["post"], url_path="cancel")
+    def cancel(self, request, pk=None):
+        serializer = CancelWorkOrderSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            updated, message_ids = cancel_work_order(
+                self.get_object(),
+                actor=request.user,
+                reason=serializer.validated_data["reason"],
+                send_notifications=serializer.validated_data.get("send_notifications", True),
+            )
+        except DjangoValidationError as exc:
+            raise drf_validation_from_django(exc) from exc
+        return Response({"work_order": WorkOrderDetailSerializer(updated, context={"request": request}).data, "work_order_message_ids": message_ids})
+
     @action(detail=True, methods=["post"], url_path="technical-action")
     def technical_action(self, request, pk=None):
         action_name = request.data.get("action")
@@ -201,6 +216,67 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
         data["public_url"] = public_url
         data.update(email_info)
         return Response(data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="manual-approval")
+    def manual_approval(self, request, pk=None):
+        serializer = WorkOrderManualApprovalSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        work_order = self.get_object()
+        now = timezone.now()
+        actor_name = (request.user.get_full_name() or request.user.get_username() or str(request.user)).strip()
+        signature_name = serializer.validated_data.get("signature_name", "").strip()
+        approval_type = serializer.validated_data.get("approval_type", "total")
+        decision_name = (signature_name or actor_name or "Aprovação manual")[:180]
+        audit_note = f"Aprovação manual {'parcial' if approval_type == 'partial' else 'total'} registrada"
+        if actor_name:
+            audit_note += f" por {actor_name} em {timezone.localtime(now).strftime('%d/%m/%Y %H:%M')}"
+        if signature_name:
+            audit_note += f" com assinatura/confirmação do cliente {signature_name}"
+        notes = f"{serializer.validated_data['notes']}\n{audit_note}".strip()
+        approval = WorkOrderCustomerApproval.objects.create(
+            work_order=work_order,
+            document_type=WorkOrderCustomerApproval.DocumentType.WORK_ORDER,
+            requested_by=request.user,
+            requested_at=now,
+            expires_at=now,
+            status=WorkOrderCustomerApproval.Status.APPROVED,
+            decision_name=decision_name,
+            decision_document=serializer.validated_data.get("signature_document", ""),
+            decision_notes=notes,
+            decided_at=now,
+            decision_ip=get_client_ip(request),
+            decision_user_agent=request.META.get("HTTP_USER_AGENT", ""),
+        )
+        if not work_order.approved_at:
+            work_order.approved_at = now
+            work_order.updated_by = request.user
+            work_order.save(update_fields=["approved_at", "updated_by", "updated_at"])
+        record_event(
+            work_order,
+            WorkOrderEvent.EventType.UPDATED,
+            actor=request.user,
+            description=f"Aprovação manual {'parcial' if approval_type == 'partial' else 'total'} registrada para a OS.",
+            data={"approval_id": approval.id, "approval_type": approval_type, "decision_name": decision_name},
+        )
+        return Response(WorkOrderCustomerApprovalSerializer(approval).data, status=status.HTTP_201_CREATED)
+
+
+    @action(detail=True, methods=["post"], url_path="create-revision-estimate")
+    def create_revision_estimate(self, request, pk=None):
+        work_order = self.get_object()
+        from attendance.serializers import EstimateSerializer
+        from attendance.services import create_revision_estimate_from_work_order
+
+        try:
+            estimate = create_revision_estimate_from_work_order(work_order, payload=request.data, actor=request.user)
+        except DjangoValidationError as exc:
+            raise drf_validation_from_django(exc) from exc
+        data = EstimateSerializer(estimate, context={"request": request}).data
+        return Response({
+            "detail": "OS já aprovada. Foi gerado um novo orçamento de revisão para aprovação do cliente.",
+            "estimate": data,
+        }, status=status.HTTP_201_CREATED)
+
 
     @action(detail=True, methods=["post"])
     def trigger_notifications(self, request, pk=None):

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseMoneyInput } from "./workshopOptions";
+import { formatMoneyEditingValue, parseMoneyInput } from "./workshopOptions";
 
 describe("parseMoneyInput", () => {
   it("interpreta números inteiros digitados como reais, não centavos", () => {
@@ -23,5 +23,14 @@ describe("parseMoneyInput", () => {
   it("mantém campo vazio quando não há dígitos", () => {
     expect(parseMoneyInput("")).toBe("");
     expect(parseMoneyInput("R$")).toBe("");
+  });
+});
+
+
+describe("formatMoneyEditingValue", () => {
+  it("mostra valores em modo editável sem prefixo R$", () => {
+    expect(formatMoneyEditingValue("15.00")).toBe("15,00");
+    expect(formatMoneyEditingValue("1234.5")).toBe("1.234,50");
+    expect(formatMoneyEditingValue(0)).toBe("0,00");
   });
 });

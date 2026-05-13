@@ -12,6 +12,7 @@ import AIAssistButton from "../components/AIAssistButton";
 import FormTabs, { TabPanel } from "../components/FormTabs";
 import TabbedFormFooter, { InlineTabbedFormFooter } from "../components/TabbedFormFooter";
 import MoneyInput from "../components/MoneyInput";
+import PercentInput from "../components/PercentInput";
 import PageHeader from "../components/PageHeader";
 import SearchableSelect from "../components/SearchableSelect";
 import { datetimeLocalValue, fromDatetimeLocal, money, priorities, todayDatetimeLocalValue, workOrderTypes } from "../workshopOptions";
@@ -34,7 +35,8 @@ function empty() {
     mileage_in: "",
     mileage_out: "",
     promised_at: todayDatetimeLocalValue(),
-    manual_discount_amount: "",
+    manual_discount_percent: "0",
+    financial_base_amount: "0",
   };
 }
 
@@ -64,7 +66,7 @@ function serviceLineFromService(service) {
     description: service.name,
     quantity: "1.00",
     unit_price: service.default_unit_price || "0.00",
-    discount_amount: "0.00",
+    discount_percent: "0",
     notes: "",
   };
 }
@@ -78,7 +80,7 @@ function serviceLineFromPackageItem(item, servicePackage) {
     description: item.description,
     quantity: item.quantity || "1.00",
     unit_price: item.unit_price || "0.00",
-    discount_amount: "0.00",
+    discount_percent: "0",
     notes: `Origem: pacote ${servicePackage.name}`,
   };
 }
@@ -87,8 +89,16 @@ function lineSubtotal(line) {
   return decimal(line.quantity) * decimal(line.unit_price);
 }
 
+function percentAmount(base, percent) {
+  return Math.max(base * decimal(percent) / 100, 0);
+}
+
+function lineDiscountAmount(line) {
+  return percentAmount(lineSubtotal(line), line.discount_percent);
+}
+
 function lineTotal(line) {
-  return Math.max(lineSubtotal(line) - decimal(line.discount_amount), 0);
+  return Math.max(lineSubtotal(line) - lineDiscountAmount(line), 0);
 }
 
 function photoPreviewUrl(file) {
@@ -103,6 +113,7 @@ export default function WorkOrderFormPage({ embedded = false, returnTo }) {
   const returnPath = returnTo || resolveReturnTo(location, "/work-orders");
   const closeForm = () => navigate(returnPath, { replace: true });
   const [form, setForm] = useState(empty());
+  const [sourceOrder, setSourceOrder] = useState(null);
   const [contacts, setContacts] = useState([]);
   const [vehicles, setVehicles] = useState([]);
   const [users, setUsers] = useState([]);
@@ -133,9 +144,24 @@ export default function WorkOrderFormPage({ embedded = false, returnTo }) {
     return candidates.slice(0, 10);
   }, [contacts, customerSearch]);
 
+  const customerOptions = useMemo(() => contacts.map((contact) => ({
+    value: contact.id,
+    label: contactName(contact),
+    description: [contact.phone_e164 || "sem telefone", contact.email || "sem email"].join(" · "),
+    meta: contact.document_number ? `CPF/CNPJ: ${contact.document_number}` : "",
+  })), [contacts]);
+
+  const vehicleOptions = useMemo(() => vehiclesForCustomer.map((vehicle) => ({
+    value: vehicle.id,
+    label: vehicle.display_name || [vehicle.plate, vehicle.model].filter(Boolean).join(" - ") || `Veículo #${vehicle.id}`,
+    description: [vehicle.make || vehicle.brand, vehicle.model, vehicle.year].filter(Boolean).join(" · "),
+    meta: vehicle.plate ? `Placa: ${vehicle.plate}` : "",
+  })), [vehiclesForCustomer]);
+
   const serviceSubtotal = useMemo(() => initialServiceItems.reduce((total, line) => total + lineSubtotal(line), 0), [initialServiceItems]);
-  const serviceLineDiscount = useMemo(() => initialServiceItems.reduce((total, line) => total + decimal(line.discount_amount), 0), [initialServiceItems]);
-  const manualDiscount = decimal(form.manual_discount_amount);
+  const serviceLineDiscount = useMemo(() => initialServiceItems.reduce((total, line) => total + lineDiscountAmount(line), 0), [initialServiceItems]);
+  const manualDiscountBase = editing ? decimal(form.financial_base_amount) : Math.max(serviceSubtotal - serviceLineDiscount, 0);
+  const manualDiscount = useMemo(() => percentAmount(manualDiscountBase, form.manual_discount_percent), [manualDiscountBase, form.manual_discount_percent]);
   const predictedTotal = Math.max(serviceSubtotal - serviceLineDiscount - manualDiscount, 0);
   const serviceOptions = useMemo(() => [
     { value: "", label: "Selecione um serviço" },
@@ -304,6 +330,10 @@ export default function WorkOrderFormPage({ embedded = false, returnTo }) {
 
       if (editing) {
         const { data } = await api.get(`/workshop/work-orders/${id}/`);
+        setSourceOrder(data);
+        const subtotalForDiscount = Number(data.subtotal_services || 0) + Number(data.subtotal_parts || 0);
+        const lineDiscounts = Math.max(Number(data.discount_total || 0) - Number(data.manual_discount_amount || 0), 0);
+        const manualDiscountBaseValue = Math.max(subtotalForDiscount - lineDiscounts, 0);
         setForm({
           customer_id: data.customer?.id || "",
           vehicle_id: data.vehicle?.id || "",
@@ -320,7 +350,8 @@ export default function WorkOrderFormPage({ embedded = false, returnTo }) {
           mileage_in: data.mileage_in || "",
           mileage_out: data.mileage_out || "",
           promised_at: datetimeLocalValue(data.promised_at) || todayDatetimeLocalValue(),
-          manual_discount_amount: data.manual_discount_amount || "",
+          manual_discount_percent: manualDiscountBaseValue ? String(((Number(data.manual_discount_amount || 0) / manualDiscountBaseValue) * 100).toFixed(2)) : "0",
+          financial_base_amount: String(manualDiscountBaseValue.toFixed(2)),
         });
         setCustomerSearch(data.customer ? contactName(data.customer) : "");
         await loadReferenceOrders(data.customer?.id, data.vehicle?.id);
@@ -345,10 +376,26 @@ export default function WorkOrderFormPage({ embedded = false, returnTo }) {
     setShowCustomerOptions(true);
   }
 
-  function onVehicleChange(event) {
-    const vehicleId = event.target.value;
+  function selectCustomer(customerId) {
+    if (!customerId) {
+      clearCustomerSelection("");
+      return;
+    }
+    const contact = contacts.find((item) => String(item.id) === String(customerId));
+    if (!contact) {
+      clearCustomerSelection("");
+      return;
+    }
+    applyCustomerSelection(contact);
+  }
+
+  function selectVehicle(vehicleId) {
     setForm((current) => ({ ...current, vehicle_id: vehicleId, reference_work_order_id: "" }));
     markReturnIfNeeded(form.customer_id, vehicleId);
+  }
+
+  function onVehicleChange(event) {
+    selectVehicle(event.target.value);
   }
 
   function onOrderTypeChange(event) {
@@ -380,13 +427,9 @@ export default function WorkOrderFormPage({ embedded = false, returnTo }) {
       return;
     }
     setInitialServiceItems((current) => [...current, ...packageItems.map((item) => serviceLineFromPackageItem(item, servicePackage))]);
-    const packageDiscount = decimal(servicePackage.discount_amount);
-    if (packageDiscount > 0) {
-      setForm((current) => ({
-        ...current,
-        manual_discount_amount: String(decimal(current.manual_discount_amount) + packageDiscount),
-      }));
-      setNotice(`Desconto do pacote ${servicePackage.name} aplicado ao desconto geral da OS.`);
+    const packageDiscountPercent = decimal(servicePackage.discount_percent);
+    if (packageDiscountPercent > 0) {
+      setNotice(`O pacote ${servicePackage.name} possui desconto cadastrado. Revise o percentual de desconto na linha ou no desconto geral da OS antes de salvar.`);
     }
     setSelectedPackageId("");
   }
@@ -473,19 +516,28 @@ export default function WorkOrderFormPage({ embedded = false, returnTo }) {
       mileage_in: Number(form.mileage_in || 0),
       mileage_out: form.mileage_out === "" ? null : Number(form.mileage_out),
       promised_at: fromDatetimeLocal(form.promised_at),
-      manual_discount_amount: form.manual_discount_amount || "0.00",
+      manual_discount_amount: manualDiscount.toFixed(2),
       initial_service_items: initialServiceItems.map((line) => ({
         service_id: line.service_id ? Number(line.service_id) : null,
         source_package_id: line.source_package_id ? Number(line.source_package_id) : null,
         description: line.description,
         quantity: line.quantity || "1.00",
         unit_price: line.unit_price || "0.00",
-        discount_amount: line.discount_amount || "0.00",
+        discount_amount: lineDiscountAmount(line).toFixed(2),
         notes: line.notes || "",
       })),
     };
 
     try {
+      if (editing && sourceOrder?.requires_revision_estimate) {
+        await api.post(`/workshop/work-orders/${id}/create-revision-estimate/`, payload);
+        closeForm();
+        return;
+      }
+      if (editing && sourceOrder?.can_edit === false) {
+        setError("Esta OS não pode ser alterada no status atual ou está aguardando aprovação.");
+        return;
+      }
       const response = editing
         ? await api.put(`/workshop/work-orders/${id}/`, payload)
         : await api.post("/workshop/work-orders/", payload);
@@ -501,13 +553,15 @@ export default function WorkOrderFormPage({ embedded = false, returnTo }) {
   return <>
     {!embedded ? (
       <>
-        <PageHeader title={editing ? "Editar ordem de serviço" : "Nova ordem de serviço"} subtitle="Cadastro de OS separado por abas para facilitar atendimento, revisão e conferência.">
+        <PageHeader title={editing && sourceOrder?.requires_revision_estimate ? "Gerar orçamento de revisão" : editing ? "Editar ordem de serviço" : "Nova ordem de serviço"} subtitle={editing && sourceOrder?.requires_revision_estimate ? "Esta OS já foi aprovada. As alterações serão salvas como novo orçamento para aprovação do cliente." : "Cadastro de OS separado por abas para facilitar atendimento, revisão e conferência."}>
           <Button as={Link} to={editing ? `/work-orders/${id}` : returnPath} variant="outline-secondary">Voltar</Button>
         </PageHeader>
         <AreaTabs area="attendance" />
       </>
     ) : null}
     <ErrorAlert error={error} onClose={() => setError("")}/>
+    {editing && sourceOrder?.has_pending_approval ? <Alert variant="warning">Esta OS está aguardando aprovação e não pode ser alterada até a decisão do cliente.</Alert> : null}
+    {editing && sourceOrder?.requires_revision_estimate ? <Alert variant="info">A OS já foi aprovada. Ao salvar, o sistema não alterará a OS diretamente; será criado um novo orçamento de revisão para aprovação.</Alert> : null}
     <SystemToast message={notice} variant="info" delay={3000} onClose={() => setNotice("")} />
 
     <Form onSubmit={save} noValidate>
@@ -517,44 +571,30 @@ export default function WorkOrderFormPage({ embedded = false, returnTo }) {
           <TabPanel activeKey={activeTab} eventKey="customer">
             <Row>
               <Col md={6}>
-                <Form.Label>Cliente</Form.Label>
-                <div className="autocomplete-box">
-                  <Form.Control
-                    ref={customerInputRef}
-                    required
-                    autoComplete="off"
-                    placeholder="Digite o nome, telefone ou email do cliente"
-                    value={customerSearch}
-                    onFocus={() => setShowCustomerOptions(true)}
-                    onBlur={() => setTimeout(() => setShowCustomerOptions(false), 150)}
-                    onChange={onCustomerInputChange}
-                  />
-                  {showCustomerOptions && filteredContacts.length > 0 && customerMenuStyle
-                    ? createPortal(
-                        <div className="autocomplete-menu autocomplete-menu-portal shadow-lg" style={customerMenuStyle}>
-                          {filteredContacts.map((contact) => <button
-                            type="button"
-                            key={contact.id}
-                            className="autocomplete-item"
-                            onMouseDown={(event) => event.preventDefault()}
-                            onClick={() => applyCustomerSelection(contact)}
-                          >
-                            <span className="fw-semibold d-block">{contactName(contact)}</span>
-                            <span className="small text-muted d-block">{contact.phone_e164 || "sem telefone"} · {contact.email || "sem email"}</span>
-                          </button>)}
-                        </div>,
-                        document.body,
-                      )
-                    : null}
-                </div>
-                <div className="small text-muted mt-1">O input exibe apenas o nome completo. Telefone e email aparecem somente na lista para ajudar na escolha.</div>
+                <SearchableSelect
+                  id="workOrderCustomer"
+                  label="Cliente"
+                  required
+                  value={form.customer_id}
+                  options={customerOptions}
+                  onChange={selectCustomer}
+                  placeholder="Pesquisar cliente por nome, telefone, e-mail ou documento"
+                  emptyMessage="Nenhum cliente encontrado. Cadastre o cliente antes de abrir a OS."
+                  helpText="Ao selecionar o cliente, o primeiro veículo ativo dele é preenchido automaticamente quando existir."
+                />
               </Col>
               <Col md={6}>
-                <Form.Label>Veículo</Form.Label>
-                <Form.Select value={form.vehicle_id} onChange={onVehicleChange} disabled={!form.customer_id}>
-                  <option value="">Sem veículo</option>
-                  {vehiclesForCustomer.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.display_name}</option>)}
-                </Form.Select>
+                <SearchableSelect
+                  id="workOrderVehicle"
+                  label="Veículo"
+                  value={form.vehicle_id}
+                  options={vehicleOptions}
+                  onChange={selectVehicle}
+                  placeholder={form.customer_id ? "Pesquisar veículo do cliente" : "Selecione um cliente primeiro"}
+                  disabled={!form.customer_id}
+                  emptyMessage="Nenhum veículo encontrado para este cliente."
+                  helpText="Você pode trocar o veículo sugerido quando o cliente tiver mais de um cadastro."
+                />
               </Col>
             </Row>
           </TabPanel>
@@ -737,7 +777,7 @@ export default function WorkOrderFormPage({ embedded = false, returnTo }) {
                       <Col lg={5}><Form.Label>Descrição</Form.Label><Form.Control value={line.description} onChange={(event) => updateInitialServiceItem(line.local_id, { description: event.target.value })}/></Col>
                       <Col md={2}><Form.Label>Qtd.</Form.Label><IntegerInput min="0.01" step="0.01" value={line.quantity} onChange={(event) => updateInitialServiceItem(line.local_id, { quantity: event.target.value })}/></Col>
                       <Col md={2}><Form.Label>Unitário</Form.Label><MoneyInput value={line.unit_price} onChange={(value) => updateInitialServiceItem(line.local_id, { unit_price: value })}/></Col>
-                      <Col md={2}><Form.Label>Desconto</Form.Label><MoneyInput value={line.discount_amount} onChange={(value) => updateInitialServiceItem(line.local_id, { discount_amount: value })}/></Col>
+                      <Col md={2}><Form.Label>Desconto (%)</Form.Label><PercentInput value={line.discount_percent} onChange={(event) => updateInitialServiceItem(line.local_id, { discount_percent: event.target.value })}/></Col>
                       <Col md={1} className="line-builder-actions"><Button type="button" size="sm" variant="outline-danger" onClick={() => removeInitialServiceItem(line.local_id)}>Remover</Button></Col>
                     </Row>
                   </div>
@@ -758,8 +798,8 @@ export default function WorkOrderFormPage({ embedded = false, returnTo }) {
                   <Form.Control readOnly value={money(serviceSubtotal)}/>
                 </Col>
                 <Col md={3}>
-                  <Form.Label>Desconto geral da OS</Form.Label>
-                  <MoneyInput value={form.manual_discount_amount} onChange={(value) => setForm({ ...form, manual_discount_amount: value })}/>
+                  <Form.Label>Desconto geral da OS (%)</Form.Label>
+                  <PercentInput value={form.manual_discount_percent} onChange={(event) => setForm({ ...form, manual_discount_percent: event.target.value })}/>
                   {serviceLineDiscount > 0 && <div className="small text-muted mt-1">Descontos por item: {money(serviceLineDiscount)}</div>}
                 </Col>
                 <Col md={3}>
@@ -768,8 +808,8 @@ export default function WorkOrderFormPage({ embedded = false, returnTo }) {
                 </Col>
               </> : <>
                 <Col md={4}>
-                  <Form.Label>Desconto geral da OS</Form.Label>
-                  <MoneyInput value={form.manual_discount_amount} onChange={(value) => setForm({ ...form, manual_discount_amount: value })}/>
+                  <Form.Label>Desconto geral da OS (%)</Form.Label>
+                  <PercentInput value={form.manual_discount_percent} onChange={(event) => setForm({ ...form, manual_discount_percent: event.target.value })}/>
                   <div className="small text-muted mt-1">Serviços, peças, pagamentos e saldo ficam no detalhe da OS.</div>
                 </Col>
               </>}
@@ -799,7 +839,7 @@ export default function WorkOrderFormPage({ embedded = false, returnTo }) {
             </Row>
           </TabPanel>
 
-          <InlineTabbedFormFooter tabs={tabs} activeKey={activeTab} onSelect={setActiveTab} onCancel={closeForm} saveLabel="Salvar" />
+          <InlineTabbedFormFooter tabs={tabs} activeKey={activeTab} onSelect={setActiveTab} onCancel={closeForm} saveLabel={editing && sourceOrder?.requires_revision_estimate ? "Gerar orçamento" : "Salvar"} />
         </Card.Body>
       </Card>
     </Form>

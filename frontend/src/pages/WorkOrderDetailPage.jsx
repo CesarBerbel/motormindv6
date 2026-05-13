@@ -9,6 +9,7 @@ import SystemToast from "../components/SystemToast";
 import FormTabs, { TabPanel } from "../components/FormTabs";
 import TabbedFormFooter, { InlineTabbedFormFooter } from "../components/TabbedFormFooter";
 import MoneyInput from "../components/MoneyInput";
+import PercentInput from "../components/PercentInput";
 import PageHeader from "../components/PageHeader";
 import StatusBadge from "../components/StatusBadge";
 import NoticeBox from "../components/NoticeBox";
@@ -17,8 +18,8 @@ import { useAuth } from "../auth/AuthContext";
 import { confirmDialog } from "../components/ConfirmDialog";
 import { buildReturnToState, resolveReturnTo } from "../utils/returnTo";
 
-const serviceEmpty = (workOrderId) => ({ work_order: workOrderId, service_id: "", description: "", quantity: "1.00", unit_price: "0.00", discount_amount: "0.00", technician_id: "", status: "pending", notes: "" });
-const partEmpty = (workOrderId) => ({ work_order: workOrderId, part_id: "", linked_service_id: "", description: "", quantity: "1.00", unit_price: "0.00", discount_amount: "0.00", consume_inventory: true, notes: "" });
+const serviceEmpty = (workOrderId) => ({ work_order: workOrderId, service_id: "", description: "", quantity: "1.00", unit_price: "0.00", discount_percent: "0", technician_id: "", status: "pending", notes: "" });
+const partEmpty = (workOrderId) => ({ work_order: workOrderId, part_id: "", linked_service_id: "", description: "", quantity: "1.00", unit_price: "0.00", discount_percent: "0", consume_inventory: true, notes: "" });
 const paymentEmpty = (workOrderId) => ({ work_order: workOrderId, amount: "0.00", method: "cash", reference: "", paid_at: new Date().toISOString(), notes: "" });
 
 function compactDate(value) {
@@ -57,6 +58,28 @@ function sortCatalogByUsage(items) {
   });
 }
 
+function decimal(value) {
+  const parsed = Number(value || 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function lineSubtotal(line) {
+  return decimal(line.quantity) * decimal(line.unit_price);
+}
+
+function percentAmount(base, percent) {
+  return Math.max(base * decimal(percent) / 100, 0);
+}
+
+function lineDiscountAmount(line) {
+  return percentAmount(lineSubtotal(line), line.discount_percent);
+}
+
+function discountPercentFromAmount(line) {
+  const subtotal = lineSubtotal(line);
+  return subtotal ? String(((decimal(line.discount_amount) / subtotal) * 100).toFixed(2)) : "0";
+}
+
 export default function WorkOrderDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -85,6 +108,8 @@ export default function WorkOrderDetailPage() {
   const [partForm, setPartForm] = useState(partEmpty(id));
   const [paymentForm, setPaymentForm] = useState(paymentEmpty(id));
   const [statusForm, setStatusForm] = useState({ status: "", note: "", send_notifications: true });
+  const [cancelModal, setCancelModal] = useState(false);
+  const [cancelForm, setCancelForm] = useState({ reason: "", send_notifications: true });
   const [messageForm, setMessageForm] = useState({ template_id: "" });
   const [selectedServiceIds, setSelectedServiceIds] = useState([]);
   const [selectedPartIds, setSelectedPartIds] = useState([]);
@@ -159,14 +184,14 @@ export default function WorkOrderDetailPage() {
   function openService(line = null) {
     setServiceEditing(line);
     setSelectedServiceIds([]);
-    setServiceForm(line ? { ...line, technician_id: line.technician || "", service_id: line.service || "" } : serviceEmpty(id));
+    setServiceForm(line ? { ...line, technician_id: line.technician || "", service_id: line.service || "", discount_percent: discountPercentFromAmount(line) } : serviceEmpty(id));
     setServiceModal(true);
   }
 
   function openPart(line = null) {
     setPartEditing(line);
     setSelectedPartIds([]);
-    setPartForm(line ? { ...line, part_id: line.part || "", linked_service_id: line.linked_service || line.linked_service_id || "" } : partEmpty(id));
+    setPartForm(line ? { ...line, part_id: line.part || "", linked_service_id: line.linked_service || line.linked_service_id || "", discount_percent: discountPercentFromAmount(line) } : partEmpty(id));
     setPartModal(true);
   }
 
@@ -181,7 +206,7 @@ export default function WorkOrderDetailPage() {
           description: service.name,
           quantity: "1.00",
           unit_price: service.default_unit_price || "0.00",
-          discount_amount: "0.00",
+          discount_percent: "0",
           technician_id: serviceForm.technician_id || null,
           status: serviceForm.status || "pending",
           notes: "",
@@ -193,7 +218,7 @@ export default function WorkOrderDetailPage() {
         return;
       }
 
-      const payload = { ...serviceForm, service_id: serviceForm.service_id || null, technician_id: serviceForm.technician_id || null };
+      const payload = { ...serviceForm, service_id: serviceForm.service_id || null, technician_id: serviceForm.technician_id || null, discount_amount: lineDiscountAmount(serviceForm).toFixed(2) };
       serviceEditing ? await api.put(`/workshop/work-order-services/${serviceEditing.id}/`, payload) : await api.post("/workshop/work-order-services/", payload);
       setServiceModal(false);
       setSelectedServiceIds([]);
@@ -215,7 +240,7 @@ export default function WorkOrderDetailPage() {
           quantity: "1.00",
           unit_price: part.sale_price || "0.00",
           cost_price: part.cost_price || "0.00",
-          discount_amount: "0.00",
+          discount_percent: "0",
           linked_service_id: partForm.linked_service_id || null,
           consume_inventory: partForm.consume_inventory,
           notes: "",
@@ -227,7 +252,7 @@ export default function WorkOrderDetailPage() {
         return;
       }
 
-      const payload = { ...partForm, part_id: partForm.part_id || null, linked_service_id: partForm.linked_service_id || null };
+      const payload = { ...partForm, part_id: partForm.part_id || null, linked_service_id: partForm.linked_service_id || null, discount_amount: lineDiscountAmount(partForm).toFixed(2) };
       partEditing ? await api.put(`/workshop/work-order-parts/${partEditing.id}/`, payload) : await api.post("/workshop/work-order-parts/", payload);
       setPartModal(false);
       setSelectedPartIds([]);
@@ -300,6 +325,20 @@ export default function WorkOrderDetailPage() {
       setOrder(res.data.work_order);
       setStatusModal(false);
       setNotice(`Status atualizado. Mensagens automáticas geradas: ${res.data.work_order_message_ids?.length || 0}.`);
+      await load();
+    } catch (err) {
+      setError(apiError(err));
+    }
+  }
+
+  async function cancelOrder(event) {
+    event.preventDefault();
+    try {
+      const res = await api.post(`/workshop/work-orders/${id}/cancel/`, cancelForm);
+      setOrder(res.data.work_order);
+      setCancelModal(false);
+      setCancelForm({ reason: "", send_notifications: true });
+      setNotice(`OS cancelada. Mensagens automáticas geradas: ${res.data.work_order_message_ids?.length || 0}.`);
       await load();
     } catch (err) {
       setError(apiError(err));
@@ -445,6 +484,10 @@ export default function WorkOrderDetailPage() {
 
   if (!order) return <><PageHeader title="Ordem de serviço"/><ErrorAlert error={error} onClose={() => setError("")}/></>;
 
+  const canEditOrder = order.can_edit !== false;
+  const canGenerateRevision = Boolean(order.requires_revision_estimate) && !order.has_pending_approval;
+  const canCancelOrder = ["open", "in_progress", "waiting_parts"].includes(order.status);
+
   const detailTabs = [
     { key: "summary", label: "Resumo", description: "Status, relato e fotos", badge: order.photos?.length || 0 },
     { key: "services", label: "Serviços", description: "Mão de obra e execução", badge: order.services?.length || 0 },
@@ -458,16 +501,20 @@ export default function WorkOrderDetailPage() {
   return <>
     <PageHeader title={`${order.number} - ${order.title || "Ordem de serviço"}`} subtitle={`${order.customer_name} · ${order.vehicle_display || "sem veículo"}`}>
       <Button variant="outline-secondary" onClick={() => navigate(returnPath)} className="me-2">Voltar</Button>
-      {hasPermission("work_orders.edit") ? <Button as={Link} to={`/work-orders/${id}/edit`} state={returnState} variant="outline-primary" className="me-2">Editar OS</Button> : null}
+      {hasPermission("work_orders.edit") && (canEditOrder || canGenerateRevision) ? <Button as={Link} to={`/work-orders/${id}/edit`} state={returnState} variant="outline-primary" className="me-2">{canGenerateRevision ? "Gerar orçamento de revisão" : "Editar OS"}</Button> : null}
       {hasPermission(["technical.dashboard", "dashboard.technical"]) ? <Button as={Link} to="/technical/workbench" variant="outline-info" className="me-2">Bancada técnica</Button> : null}
-      {hasPermission("work_orders.edit") ? <Button variant="outline-success" onClick={() => setPhotoModal(true)} className="me-2">Adicionar fotos</Button> : null}
+      {hasPermission("work_orders.edit") && canEditOrder ? <Button variant="outline-success" onClick={() => setPhotoModal(true)} className="me-2">Adicionar fotos</Button> : null}
       <Button variant="outline-dark" onClick={() => openDocumentPdf("work_order")} className="me-2">PDF OS</Button>
       <Button variant="outline-dark" onClick={() => openDocumentPdf("estimate")} className="me-2">PDF orçamento</Button>
       {deliverySignature ? <Button variant="outline-dark" onClick={openDeliveryReceiptPdf} className="me-2">PDF entrega</Button> : null}
-      {hasPermission("work_orders.edit") ? <Button variant="outline-warning" onClick={() => { setApprovalResult(null); setApprovalModal(true); }} className="me-2">Aprovação digital</Button> : null}
+      {hasPermission("work_orders.edit") && canEditOrder ? <Button variant="outline-warning" onClick={() => { setApprovalResult(null); setApprovalModal(true); }} className="me-2">Aprovação digital</Button> : null}
+      {hasPermission("work_orders.status") && canCancelOrder ? <Button variant="outline-danger" onClick={() => setCancelModal(true)} className="me-2">Cancelar OS</Button> : null}
       {hasPermission("work_orders.status") ? <Button onClick={openStatusChangeModal} disabled={!allowedStatusTransitions.length}>Alterar status</Button> : null}
     </PageHeader>
     <ErrorAlert error={error} onClose={() => setError("")}/>
+    {order.has_pending_approval ? <div className="alert alert-warning">Esta OS está aguardando aprovação do cliente e não pode ser alterada.</div> : null}
+    {canGenerateRevision ? <div className="alert alert-info">Esta OS já foi aprovada. Para alterar serviços, peças ou valores, gere um novo orçamento de revisão para aprovação.</div> : null}
+    {order.status === "cancelled" ? <div className="alert alert-danger"><strong>OS cancelada.</strong>{order.cancellation_reason ? ` Justificativa: ${order.cancellation_reason}` : ""}</div> : null}
     <SystemToast message={notice} variant="success" delay={3000} onClose={() => setNotice("")} />
 
     <FormTabs tabs={detailTabs} activeKey={activeTab} onSelect={setActiveTab} className="os-detail-tabs" />
@@ -481,6 +528,7 @@ export default function WorkOrderDetailPage() {
               <div><div className="text-muted small">Prioridade</div><StatusBadge value={order.priority} label={order.priority_label}/></div>
               <div><div className="text-muted small">Responsável</div><strong>{order.assigned_to_name || "-"}</strong></div>
               <div><div className="text-muted small">Previsão</div><strong>{compactDate(order.promised_at)}</strong></div>
+              {order.cancelled_at ? <div><div className="text-muted small">Cancelada em</div><strong>{compactDate(order.cancelled_at)}</strong></div> : null}
             </div>
             <Row>
               <Col md={6}><h6>Relato do cliente</h6><p className="white-space-preline">{order.complaint || "-"}</p></Col>
@@ -490,6 +538,7 @@ export default function WorkOrderDetailPage() {
               <Col md={6}><h6>Solução executada</h6><p className="white-space-preline">{order.solution || "-"}</p></Col>
               <Col md={6}><h6>Observações ao cliente</h6><p className="white-space-preline">{order.customer_notes || "-"}</p></Col>
             </Row>
+            {order.cancellation_reason ? <Alert variant="danger" className="mt-3 mb-0"><strong>Justificativa do cancelamento:</strong><br />{order.cancellation_reason}</Alert> : null}
             <div className="border-top pt-3 mt-2">
               <div className="text-muted small mb-2">Próximas etapas permitidas pela máquina de estados</div>
               {allowedStatusTransitions.length ? <div className="d-flex flex-wrap gap-2">
@@ -539,7 +588,7 @@ export default function WorkOrderDetailPage() {
             <strong>Fotos de proteção e evidências</strong>
             <div className="small text-muted">Fotos de entrada, avarias pré-existentes, hodômetro, documentos e entrega.</div>
           </div>
-          {hasPermission("work_orders.edit") ? <Button size="sm" variant="outline-success" onClick={() => setPhotoModal(true)}>Adicionar fotos</Button> : null}
+          {hasPermission("work_orders.edit") && canEditOrder ? <Button size="sm" variant="outline-success" onClick={() => setPhotoModal(true)}>Adicionar fotos</Button> : null}
         </Card.Header>
         <Card.Body>
           {order.photos?.length ? (
@@ -555,7 +604,7 @@ export default function WorkOrderDetailPage() {
                       <div className="small text-muted white-space-preline">{photo.caption || "Sem legenda"}</div>
                       <div className="small text-muted mt-2">{compactDate(photo.taken_at)}</div>
                       <div className="small text-muted text-truncate">Por: {photo.uploaded_by_name || "Sistema"}</div>
-                      {hasPermission("work_orders.edit") ? <Button size="sm" variant="outline-danger" className="mt-2" onClick={() => removePhoto(photo)}>Excluir</Button> : null}
+                      {hasPermission("work_orders.edit") && canEditOrder ? <Button size="sm" variant="outline-danger" className="mt-2" onClick={() => removePhoto(photo)}>Excluir</Button> : null}
                     </Card.Body>
                   </Card>
                 </Col>
@@ -573,7 +622,7 @@ export default function WorkOrderDetailPage() {
       <Card className="border-0 shadow-sm mb-3">
         <Card.Header className="bg-white d-flex justify-content-between align-items-center">
           <div><strong>Serviços técnicos</strong><div className="small text-muted">Ao adicionar um serviço com peças padrão cadastradas, elas entram automaticamente vinculadas ao serviço.</div></div>
-          {hasPermission("work_order_services.manage") ? <Button size="sm" onClick={() => openService()}>Adicionar serviço</Button> : null}
+          {hasPermission("work_order_services.manage") && canEditOrder ? <Button size="sm" onClick={() => openService()}>Adicionar serviço</Button> : null}
         </Card.Header>
         <Card.Body>
           {order.services?.length ? (
@@ -600,8 +649,8 @@ export default function WorkOrderDetailPage() {
                       <Col md={2}><div className="small text-muted">Fim</div>{compactDate(line.finished_at)}</Col>
                       <Col md={2}><div className="small text-muted">Tempo</div>{line.duration_label || "-"}</Col>
                       <Col md={4} className="line-builder-actions">
-                        {hasPermission("work_order_services.manage") ? <Button size="sm" variant="outline-primary" onClick={() => openService(line)}>Editar</Button> : null}
-                        {hasPermission("work_order_services.manage") ? <Button size="sm" variant="outline-danger" onClick={() => removeLine(`/workshop/work-order-services/${line.id}/`, "serviço")}>Excluir</Button> : null}
+                        {hasPermission("work_order_services.manage") && canEditOrder ? <Button size="sm" variant="outline-primary" onClick={() => openService(line)}>Editar</Button> : null}
+                        {hasPermission("work_order_services.manage") && canEditOrder ? <Button size="sm" variant="outline-danger" onClick={() => removeLine(`/workshop/work-order-services/${line.id}/`, "serviço")}>Excluir</Button> : null}
                       </Col>
                     </Row>
                   </div>
@@ -688,7 +737,7 @@ export default function WorkOrderDetailPage() {
       <Card className="border-0 shadow-sm mb-3">
         <Card.Header className="bg-white d-flex justify-content-between align-items-center">
           <div><strong>Peças</strong><div className="small text-muted">Agrupe por serviço para facilitar conferência, aprovação e consumo de estoque.</div></div>
-          {hasPermission("work_order_parts.manage") ? <Button size="sm" onClick={() => openPart()}>Adicionar peça</Button> : null}
+          {hasPermission("work_order_parts.manage") && canEditOrder ? <Button size="sm" onClick={() => openPart()}>Adicionar peça</Button> : null}
         </Card.Header>
         <Card.Body>
           {order.parts?.length ? (
@@ -712,8 +761,8 @@ export default function WorkOrderDetailPage() {
                     <Col md={2}><div className="small text-muted">Unitário</div>{money(line.unit_price)}</Col>
                     <Col md={2}><div className="small text-muted">Desconto</div>{money(line.discount_amount)}</Col>
                     <Col md={6} className="line-builder-actions">
-                      <Button size="sm" variant="outline-primary" onClick={() => openPart(line)}>Editar</Button>
-                      <Button size="sm" variant="outline-danger" onClick={() => removeLine(`/workshop/work-order-parts/${line.id}/`, "peça")}>Excluir</Button>
+                      {canEditOrder ? <Button size="sm" variant="outline-primary" onClick={() => openPart(line)}>Editar</Button> : null}
+                      {canEditOrder ? <Button size="sm" variant="outline-danger" onClick={() => removeLine(`/workshop/work-order-parts/${line.id}/`, "peça")}>Excluir</Button> : null}
                     </Col>
                   </Row>
                 </div>
@@ -978,7 +1027,7 @@ export default function WorkOrderDetailPage() {
               <Row className="mt-3">
                 <Col><Form.Label>Qtd.</Form.Label><IntegerInput step="0.01" value={serviceForm.quantity} onChange={(e) => setServiceForm({ ...serviceForm, quantity: e.target.value })}/></Col>
                 <Col><Form.Label>Unitário</Form.Label><MoneyInput value={serviceForm.unit_price} onChange={(value) => setServiceForm({ ...serviceForm, unit_price: value })}/></Col>
-                <Col><Form.Label>Desconto</Form.Label><MoneyInput value={serviceForm.discount_amount} onChange={(value) => setServiceForm({ ...serviceForm, discount_amount: value })}/></Col>
+                <Col><Form.Label>Desconto (%)</Form.Label><PercentInput value={serviceForm.discount_percent} onChange={(event) => setServiceForm({ ...serviceForm, discount_percent: event.target.value })}/></Col>
                 <Col><Form.Label>Status</Form.Label><Form.Select value={serviceForm.status} onChange={(e) => setServiceForm({ ...serviceForm, status: e.target.value })}><option value="pending">Pendente</option><option value="approved">Aprovado</option><option value="in_progress">Em execução</option><option value="done">Concluído</option><option value="cancelled">Cancelado</option></Form.Select></Col>
               </Row>
               <Form.Label className="mt-3">Notas</Form.Label><Form.Control as="textarea" rows={3} value={serviceForm.notes || ""} onChange={(e) => setServiceForm({ ...serviceForm, notes: e.target.value })}/>
@@ -1046,7 +1095,7 @@ export default function WorkOrderDetailPage() {
               </Row>
               <Form.Label className="mt-3">Descrição</Form.Label>
               <Form.Control required={Boolean(partEditing) || !selectedPartIds.length} value={partForm.description} onChange={(e) => setPartForm({ ...partForm, description: e.target.value })}/>
-              <Row className="mt-3"><Col><Form.Label>Qtd.</Form.Label><IntegerInput step="0.01" value={partForm.quantity} onChange={(e) => setPartForm({ ...partForm, quantity: e.target.value })}/></Col><Col><Form.Label>Unitário</Form.Label><MoneyInput value={partForm.unit_price} onChange={(value) => setPartForm({ ...partForm, unit_price: value })}/></Col><Col><Form.Label>Desconto</Form.Label><MoneyInput value={partForm.discount_amount} onChange={(value) => setPartForm({ ...partForm, discount_amount: value })}/></Col></Row>
+              <Row className="mt-3"><Col><Form.Label>Qtd.</Form.Label><IntegerInput step="0.01" value={partForm.quantity} onChange={(e) => setPartForm({ ...partForm, quantity: e.target.value })}/></Col><Col><Form.Label>Unitário</Form.Label><MoneyInput value={partForm.unit_price} onChange={(value) => setPartForm({ ...partForm, unit_price: value })}/></Col><Col><Form.Label>Desconto (%)</Form.Label><PercentInput value={partForm.discount_percent} onChange={(event) => setPartForm({ ...partForm, discount_percent: event.target.value })}/></Col></Row>
               <Form.Check className="mt-3" label="Consumir estoque ao aprovar/iniciar a OS" checked={!!partForm.consume_inventory} onChange={(e) => setPartForm({ ...partForm, consume_inventory: e.target.checked })}/>
               <Form.Label className="mt-3">Notas</Form.Label><Form.Control as="textarea" rows={3} value={partForm.notes || ""} onChange={(e) => setPartForm({ ...partForm, notes: e.target.value })}/>
             </Card.Body>
@@ -1057,6 +1106,19 @@ export default function WorkOrderDetailPage() {
     </Modal>
 
     <Modal show={paymentModal} onHide={() => setPaymentModal(false)}><Form onSubmit={savePayment}><Modal.Header closeButton><Modal.Title>Registrar pagamento</Modal.Title></Modal.Header><Modal.Body><Form.Label>Valor</Form.Label><MoneyInput className="mb-3" value={paymentForm.amount} onChange={(value) => setPaymentForm({ ...paymentForm, amount: value })}/><Form.Label>Forma</Form.Label><Form.Select className="mb-3" value={paymentForm.method} onChange={(e) => setPaymentForm({ ...paymentForm, method: e.target.value })}>{paymentMethods.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Form.Select><Form.Label>Referência</Form.Label><Form.Control className="mb-3" value={paymentForm.reference} onChange={(e) => setPaymentForm({ ...paymentForm, reference: e.target.value })}/><Form.Label>Notas</Form.Label><Form.Control as="textarea" rows={3} value={paymentForm.notes} onChange={(e) => setPaymentForm({ ...paymentForm, notes: e.target.value })}/></Modal.Body><Modal.Footer><Button variant="secondary" onClick={() => setPaymentModal(false)}>Cancelar</Button><Button type="submit">Salvar</Button></Modal.Footer></Form></Modal>
+
+    <Modal show={cancelModal} onHide={() => setCancelModal(false)} centered>
+      <Form onSubmit={cancelOrder}>
+        <Modal.Header closeButton><Modal.Title>Cancelar OS {order.number}</Modal.Title></Modal.Header>
+        <Modal.Body>
+          <Alert variant="warning">O cancelamento exige justificativa e ficará registrado no histórico da OS.</Alert>
+          <Form.Label>Justificativa do cancelamento</Form.Label>
+          <Form.Control required minLength={5} as="textarea" rows={4} value={cancelForm.reason} onChange={(e) => setCancelForm({ ...cancelForm, reason: e.target.value })} placeholder="Ex.: Cliente cancelou o serviço antes da execução." />
+          <Form.Check className="mt-3" label="Disparar notificações automáticas configuradas para cancelamento" checked={cancelForm.send_notifications} onChange={(e) => setCancelForm({ ...cancelForm, send_notifications: e.target.checked })} />
+        </Modal.Body>
+        <Modal.Footer><Button variant="secondary" onClick={() => setCancelModal(false)}>Fechar</Button><Button type="submit" variant="danger">Confirmar cancelamento</Button></Modal.Footer>
+      </Form>
+    </Modal>
 
     <Modal show={statusModal} onHide={() => setStatusModal(false)}><Form onSubmit={changeStatus}><Modal.Header closeButton><Modal.Title>Alterar status</Modal.Title></Modal.Header><Modal.Body>{allowedStatusTransitions.length ? <><Form.Label>Novo status</Form.Label><Form.Select className="mb-3" value={statusForm.status} onChange={(e) => setStatusForm({ ...statusForm, status: e.target.value })}>{allowedStatusTransitions.map((item) => <option key={item.status} value={item.status}>{item.status_label} — {item.label}</option>)}</Form.Select>{statusForm.status && <Alert variant="light" className="border small">{allowedStatusTransitions.find((item) => item.status === statusForm.status)?.description}</Alert>}<Form.Label>Observação {selectedTransitionRequiresNote() ? <span className="text-danger">*</span> : null}</Form.Label><Form.Control as="textarea" rows={3} required={selectedTransitionRequiresNote()} value={statusForm.note} onChange={(e) => setStatusForm({ ...statusForm, note: e.target.value })}/><Form.Check className="mt-3" label="Disparar notificações automáticas configuradas para este status" checked={statusForm.send_notifications} onChange={(e) => setStatusForm({ ...statusForm, send_notifications: e.target.checked })}/></> : <Alert variant="warning" className="mb-0">Não há transição de status permitida para seu perfil neste momento.</Alert>}</Modal.Body><Modal.Footer><Button variant="secondary" onClick={() => setStatusModal(false)}>Cancelar</Button><Button type="submit" disabled={!allowedStatusTransitions.length || !statusForm.status}>Atualizar</Button></Modal.Footer></Form></Modal>
 

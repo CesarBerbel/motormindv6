@@ -53,6 +53,14 @@ WORK_ORDER_STATE_GRAPH: dict[str, tuple[TransitionRule, ...]] = {
             roles=TECHNICAL_ROLES,
             sources=frozenset({SOURCE_MANUAL, SOURCE_TECHNICAL_WAITING_PARTS, SOURCE_SYSTEM}),
         ),
+        TransitionRule(
+            target=WorkOrder.Status.CANCELLED,
+            label="Cancelar OS",
+            description="Cancela uma OS aberta com justificativa obrigatória.",
+            roles=ATTENDANCE_ROLES | TECHNICAL_ROLES | FINISHING_ROLES,
+            sources=frozenset({SOURCE_MANUAL, SOURCE_SYSTEM}),
+            requires_note=True,
+        ),
     ),
     WorkOrder.Status.IN_PROGRESS: (
         TransitionRule(
@@ -68,6 +76,14 @@ WORK_ORDER_STATE_GRAPH: dict[str, tuple[TransitionRule, ...]] = {
             description="Conclui a execução operacional da OS.",
             roles=TECHNICAL_ROLES | FINISHING_ROLES,
             sources=frozenset({SOURCE_MANUAL, SOURCE_TECHNICAL_COMPLETE, SOURCE_SYSTEM}),
+        ),
+        TransitionRule(
+            target=WorkOrder.Status.CANCELLED,
+            label="Cancelar OS",
+            description="Cancela uma OS em execução com justificativa obrigatória.",
+            roles=ATTENDANCE_ROLES | TECHNICAL_ROLES | FINISHING_ROLES,
+            sources=frozenset({SOURCE_MANUAL, SOURCE_SYSTEM}),
+            requires_note=True,
         ),
     ),
     WorkOrder.Status.WAITING_PARTS: (
@@ -86,22 +102,33 @@ WORK_ORDER_STATE_GRAPH: dict[str, tuple[TransitionRule, ...]] = {
             sources=frozenset({SOURCE_MANUAL, SOURCE_TECHNICAL_COMPLETE, SOURCE_SYSTEM}),
             requires_note=True,
         ),
+        TransitionRule(
+            target=WorkOrder.Status.CANCELLED,
+            label="Cancelar OS",
+            description="Cancela uma OS aguardando peças com justificativa obrigatória.",
+            roles=ATTENDANCE_ROLES | TECHNICAL_ROLES | FINISHING_ROLES,
+            sources=frozenset({SOURCE_MANUAL, SOURCE_SYSTEM}),
+            requires_note=True,
+        ),
     ),
     WorkOrder.Status.COMPLETED: (),
+    WorkOrder.Status.CANCELLED: (),
 }
 
-TERMINAL_STATUSES = frozenset({WorkOrder.Status.COMPLETED})
+TERMINAL_STATUSES = frozenset({WorkOrder.Status.COMPLETED, WorkOrder.Status.CANCELLED})
 
 STATE_ORDER = {
     WorkOrder.Status.OPEN: 10,
     WorkOrder.Status.IN_PROGRESS: 20,
     WorkOrder.Status.WAITING_PARTS: 25,
     WorkOrder.Status.COMPLETED: 30,
+    WorkOrder.Status.CANCELLED: 99,
 }
 
 INVALID_REGRESSION_HINTS = {
     (WorkOrder.Status.COMPLETED, WorkOrder.Status.OPEN): "OS concluída é estado final operacional. Abra uma nova OS de retorno/garantia se necessário.",
     (WorkOrder.Status.COMPLETED, WorkOrder.Status.IN_PROGRESS): "OS concluída não volta para execução pelo fluxo principal. Registre uma OS de retorno/garantia.",
+    (WorkOrder.Status.CANCELLED, WorkOrder.Status.OPEN): "OS cancelada não pode ser reaberta pelo fluxo operacional. Abra uma nova OS ou gere um novo orçamento, se necessário.",
 }
 
 

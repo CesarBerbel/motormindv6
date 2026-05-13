@@ -7,7 +7,7 @@ from accounts.roles import ROLE_TECHNICIAN
 from accounts.services import get_user_role, user_has_permission
 
 from .events import _set_work_order_status, record_event
-from .inventory import consume_parts_inventory
+from .inventory import consume_parts_inventory, release_work_order_part_reservations
 from .notifications import trigger_status_notifications
 from .state_targets import TECHNICAL_COMPLETE_TARGETS, TECHNICAL_START_TARGETS
 from ..models import WorkOrder, WorkOrderEvent
@@ -72,7 +72,7 @@ def change_work_order_status(work_order, new_status, actor=None, note="", send_n
         old_status = locked.status
         before = model_snapshot(
             locked,
-            ["number", "status", "manual_discount_amount", "discount_total", "grand_total", "paid_total", "balance_due", "started_at", "completed_at", "delivered_at"],
+            ["number", "status", "manual_discount_amount", "discount_total", "grand_total", "paid_total", "balance_due", "started_at", "completed_at", "delivered_at", "cancelled_at", "cancellation_reason"],
         )
         _set_work_order_status(locked, new_status, actor=actor, note=note, source=source, save=True)
         if locked.status in {WorkOrder.Status.IN_PROGRESS, WorkOrder.Status.COMPLETED}:
@@ -84,7 +84,7 @@ def change_work_order_status(work_order, new_status, actor=None, note="", send_n
             user=actor,
             description=note or f"Status da OS alterado para {locked.status_label}.",
             before=before,
-            after=model_snapshot(locked, ["number", "status", "manual_discount_amount", "discount_total", "grand_total", "paid_total", "balance_due", "started_at", "completed_at", "delivered_at"]),
+            after=model_snapshot(locked, ["number", "status", "manual_discount_amount", "discount_total", "grand_total", "paid_total", "balance_due", "started_at", "completed_at", "delivered_at", "cancelled_at", "cancellation_reason"]),
             metadata={"old_status": old_status, "new_status": locked.status, "source": source},
             reason=note,
         )
@@ -100,3 +100,20 @@ def change_work_order_status(work_order, new_status, actor=None, note="", send_n
         fresh = WorkOrder.objects.select_related("customer", "vehicle", "assigned_to").get(pk=locked.pk)
         sent = trigger_status_notifications(fresh, actor=actor)
     return locked, sent
+
+
+def cancel_work_order(work_order, actor=None, reason="", send_notifications=True):
+    reason = (reason or "").strip()
+    if len(reason) < 5:
+        raise ValidationError({"reason": "Informe uma justificativa com pelo menos 5 caracteres para cancelar a OS."})
+    updated, message_ids = change_work_order_status(
+        work_order,
+        WorkOrder.Status.CANCELLED,
+        actor=actor,
+        note=reason,
+        send_notifications=send_notifications,
+        source=SOURCE_MANUAL,
+    )
+    release_work_order_part_reservations(updated, actor=actor, reason=f"Cancelamento da OS. {reason}")
+    updated.refresh_from_db()
+    return updated, message_ids

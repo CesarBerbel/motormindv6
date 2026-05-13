@@ -206,7 +206,11 @@ class Estimate(TimeStampedModel):
     approved_at = models.DateTimeField(null=True, blank=True)
     rejected_at = models.DateTimeField(null=True, blank=True)
     converted_at = models.DateTimeField(null=True, blank=True)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+    cancellation_reason = models.TextField(blank=True)
+    cancelled_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="cancelled_estimates")
     converted_work_order = models.OneToOneField(WorkOrder, null=True, blank=True, on_delete=models.SET_NULL, related_name="source_estimate")
+    revision_work_order = models.ForeignKey(WorkOrder, null=True, blank=True, on_delete=models.SET_NULL, related_name="revision_estimates")
     subtotal_services = models.DecimalField(max_digits=12, decimal_places=2, default=ZERO)
     subtotal_parts = models.DecimalField(max_digits=12, decimal_places=2, default=ZERO)
     discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=ZERO, validators=[MinValueValidator(ZERO)])
@@ -291,8 +295,8 @@ class EstimateServiceItem(TimeStampedModel):
 
     def save(self, *args, **kwargs):
         is_new = self.pk is None
-        if self.estimate_id and self.estimate.status not in {Estimate.Status.OPEN, Estimate.Status.DIAGNOSIS, Estimate.Status.AWAITING_APPROVAL}:
-            raise ValidationError("Itens só podem ser alterados em orçamento rascunho ou enviado.")
+        if self.estimate_id and self.estimate.status not in {Estimate.Status.OPEN, Estimate.Status.REJECTED}:
+            raise ValidationError("Itens só podem ser alterados em orçamento aberto ou recusado.")
         if self.service:
             if not self.description:
                 self.description = self.service.name
@@ -327,8 +331,8 @@ class EstimateServiceItem(TimeStampedModel):
         return created
 
     def delete(self, *args, **kwargs):
-        if self.estimate.status not in {Estimate.Status.OPEN, Estimate.Status.DIAGNOSIS, Estimate.Status.AWAITING_APPROVAL}:
-            raise ValidationError("Itens só podem ser excluídos em orçamento rascunho ou enviado.")
+        if self.estimate.status not in {Estimate.Status.OPEN, Estimate.Status.REJECTED}:
+            raise ValidationError("Itens só podem ser excluídos em orçamento aberto ou recusado.")
         estimate = self.estimate
         result = super().delete(*args, **kwargs)
         estimate.recalculate_totals()
@@ -364,8 +368,8 @@ class EstimatePartItem(TimeStampedModel):
         return total if total > ZERO else ZERO
 
     def save(self, *args, **kwargs):
-        if self.estimate_id and self.estimate.status not in {Estimate.Status.OPEN, Estimate.Status.DIAGNOSIS, Estimate.Status.AWAITING_APPROVAL}:
-            raise ValidationError("Itens só podem ser alterados em orçamento rascunho ou enviado.")
+        if self.estimate_id and self.estimate.status not in {Estimate.Status.OPEN, Estimate.Status.REJECTED}:
+            raise ValidationError("Itens só podem ser alterados em orçamento aberto ou recusado.")
         if self.part:
             if not self.description:
                 self.description = self.part.name
@@ -377,8 +381,8 @@ class EstimatePartItem(TimeStampedModel):
         self.estimate.recalculate_totals()
 
     def delete(self, *args, **kwargs):
-        if self.estimate.status not in {Estimate.Status.OPEN, Estimate.Status.DIAGNOSIS, Estimate.Status.AWAITING_APPROVAL}:
-            raise ValidationError("Itens só podem ser excluídos em orçamento rascunho ou enviado.")
+        if self.estimate.status not in {Estimate.Status.OPEN, Estimate.Status.REJECTED}:
+            raise ValidationError("Itens só podem ser excluídos em orçamento aberto ou recusado.")
         estimate = self.estimate
         result = super().delete(*args, **kwargs)
         estimate.recalculate_totals()

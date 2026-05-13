@@ -25,6 +25,8 @@ def apply_status_timestamps(work_order):
             work_order.completed_at = now
         if not work_order.delivered_at:
             work_order.delivered_at = now
+    if work_order.status == WorkOrder.Status.CANCELLED and not work_order.cancelled_at:
+        work_order.cancelled_at = now
 def _set_work_order_status(locked_order, new_status, actor=None, note="", source=SOURCE_MANUAL, save=True):
     old_status = locked_order.status
     if old_status == new_status:
@@ -32,6 +34,9 @@ def _set_work_order_status(locked_order, new_status, actor=None, note="", source
     rule = validate_work_order_transition(locked_order, new_status, actor=actor, note=note, source=source)
     locked_order.status = new_status
     locked_order.updated_by = actor if getattr(actor, "is_authenticated", False) else None
+    if new_status == WorkOrder.Status.CANCELLED:
+        locked_order.cancellation_reason = (note or "").strip()
+        locked_order.cancelled_by = actor if getattr(actor, "is_authenticated", False) else None
     apply_status_timestamps(locked_order)
     if save:
         locked_order.save()

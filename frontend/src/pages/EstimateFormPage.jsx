@@ -11,6 +11,7 @@ import ErrorAlert from "../components/ErrorAlert";
 import FormTabs, { TabPanel } from "../components/FormTabs";
 import TabbedFormFooter from "../components/TabbedFormFooter";
 import MoneyInput from "../components/MoneyInput";
+import PercentInput from "../components/PercentInput";
 import PageHeader from "../components/PageHeader";
 import PhoneInputBR from "../components/PhoneInputBR";
 import SearchableSelect from "../components/SearchableSelect";
@@ -18,9 +19,9 @@ import { dateInputValue, fuelTankLevelOptions, maskCpfCnpj, money, normalizePart
 import { normalizeBrazilPhoneToE164 } from "../utils/phone";
 import { resolveReturnTo } from "../utils/returnTo";
 
-const emptyEstimate = () => ({ customer_id: "", vehicle_id: "", title: "", complaint: "", diagnosis: "", internal_notes: "", customer_notes: "", valid_until: dateInputValue(), tank_level_percent: "0", discount_amount: "", services: [], parts: [] });
-const emptyService = () => ({ local_id: makeLocalId(), service_id: "", description: "", quantity: "1.00", unit_price: "", discount_amount: "0.00", notes: "" });
-const emptyPart = () => ({ local_id: makeLocalId(), service_local_id: "", part_id: "", description: "", quantity: "1.00", unit_price: "", cost_price: "", discount_amount: "0.00", notes: "" });
+const emptyEstimate = () => ({ customer_id: "", vehicle_id: "", title: "", complaint: "", diagnosis: "", internal_notes: "", customer_notes: "", valid_until: dateInputValue(), tank_level_percent: "0", discount_percent: "0", services: [], parts: [] });
+const emptyService = () => ({ local_id: makeLocalId(), service_id: "", description: "", quantity: "1.00", unit_price: "", discount_percent: "0", notes: "" });
+const emptyPart = () => ({ local_id: makeLocalId(), service_local_id: "", part_id: "", description: "", quantity: "1.00", unit_price: "", cost_price: "", discount_percent: "0", notes: "" });
 const emptyQuickCustomerVehicle = () => ({
   person_type: "individual",
   first_name: "",
@@ -121,7 +122,10 @@ const quickPackageTabs = [
 
 function decimal(value) { const parsed = Number(value || 0); return Number.isFinite(parsed) ? parsed : 0; }
 function lineSubtotal(line) { return decimal(line.quantity) * decimal(line.unit_price); }
-function lineTotal(line) { return Math.max(lineSubtotal(line) - decimal(line.discount_amount), 0); }
+function percentAmount(base, percent) { return Math.max(decimal(base) * decimal(percent) / 100, 0); }
+function percentFromAmount(base, amount) { const parsedBase = decimal(base); return parsedBase > 0 ? ((decimal(amount) / parsedBase) * 100).toFixed(2) : "0"; }
+function lineDiscountAmount(line) { return percentAmount(lineSubtotal(line), line.discount_percent); }
+function lineTotal(line) { return Math.max(lineSubtotal(line) - lineDiscountAmount(line), 0); }
 function contactName(contact) { return contact.full_name || `${contact.first_name || ""} ${contact.last_name || ""}`.trim() || "Cliente sem nome"; }
 function normalizePlate(value) { return String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 7); }
 function normalizeFipeName(value) { return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, ""); }
@@ -139,7 +143,8 @@ function sortCatalogByUsage(items = []) {
   });
 }
 function partLineSubtotal(line) { return decimal(line.quantity) * decimal(line.unit_price); }
-function partLineTotal(line) { return Math.max(partLineSubtotal(line) - decimal(line.discount_amount), 0); }
+function partDiscountAmount(line) { return percentAmount(partLineSubtotal(line), line.discount_percent); }
+function partLineTotal(line) { return Math.max(partLineSubtotal(line) - partDiscountAmount(line), 0); }
 function defaultPartsForService(service, serviceLocalId = "") {
   const templates = Array.isArray(service?.default_parts) ? service.default_parts : [];
   return templates
@@ -152,7 +157,7 @@ function defaultPartsForService(service, serviceLocalId = "") {
       quantity: template.quantity || "1.00",
       unit_price: template.effective_unit_price || template.unit_price || template.part_sale_price || "0.00",
       cost_price: template.part_cost_price || "0.00",
-      discount_amount: template.discount_amount || "0.00",
+      discount_percent: percentFromAmount(decimal(template.quantity || "1.00") * decimal(template.effective_unit_price || template.unit_price || template.part_sale_price || "0.00"), template.discount_amount || "0.00"),
       notes: template.notes || (service?.name ? `Adicionada automaticamente pelo serviço ${service.name}.` : "Adicionada automaticamente pelo serviço."),
     }));
 }
@@ -1165,6 +1170,123 @@ function IncludePartModal({ show, onHide, onConfirm, parts, serviceLineOptions }
 }
 
 
+
+function EstimateServiceLineModal({ show, onHide, onConfirm, services }) {
+  const [line, setLine] = useState(emptyService());
+  const serviceOptions = useMemo(() => [
+    { value: "", label: "Serviço manual", description: "Digite livremente a descrição, quantidade e valor." },
+    ...sortCatalogByUsage(services || []).map((service) => ({
+      value: service.id,
+      label: [service.code, service.name].filter(Boolean).join(" - "),
+      description: service.category_name || "Serviço cadastrado",
+      meta: `Valor padrão: ${money(service.default_unit_price || 0)}`,
+    })),
+  ], [services]);
+
+  useEffect(() => {
+    if (show) setLine(emptyService());
+  }, [show]);
+
+  function update(patch) {
+    setLine((current) => ({ ...current, ...patch }));
+  }
+
+  function selectService(serviceId) {
+    const service = (services || []).find((item) => String(item.id) === String(serviceId));
+    update(service ? {
+      service_id: String(service.id),
+      description: service.name || service.description || "",
+      unit_price: service.default_unit_price || "0.00",
+    } : { service_id: "" });
+  }
+
+  function submit(event) {
+    event.preventDefault();
+    const description = String(line.description || "").trim();
+    if (!description) return;
+    onConfirm({ ...line, description, quantity: line.quantity || "1.00", unit_price: line.unit_price || "0.00", discount_percent: line.discount_percent || "0" });
+  }
+
+  return <Modal keyboard={false} backdrop="static" size="lg" show={show} onHide={onHide} dialogClassName="floating-form-modal">
+    <Form onSubmit={submit}>
+      <Modal.Header closeButton><Modal.Title>Incluir serviço no orçamento</Modal.Title></Modal.Header>
+      <Modal.Body>
+        <Row className="g-3">
+          <Col md={12}><SearchableSelect label="Serviço do catálogo" value={line.service_id || ""} options={serviceOptions} onChange={selectService} placeholder="Pesquisar serviço ou manter manual" emptyMessage="Nenhum serviço encontrado." /></Col>
+          <Col md={12}><Form.Label>Descrição para o cliente</Form.Label><Form.Control required value={line.description} onChange={(event) => update({ description: event.target.value })} placeholder="Ex.: Revisão preventiva" /></Col>
+          <Col md={3}><Form.Label>Qtd.</Form.Label><IntegerInput min="0.01" step="0.01" value={line.quantity} onChange={(event) => update({ quantity: event.target.value })} /></Col>
+          <Col md={3}><Form.Label>Unitário</Form.Label><MoneyInput value={line.unit_price} onChange={(value) => update({ unit_price: value })} /></Col>
+          <Col md={3}><Form.Label>Desconto (%)</Form.Label><PercentInput value={line.discount_percent} onChange={(event) => update({ discount_percent: event.target.value })} /></Col>
+          <Col md={3}><div className="finance-total-box total"><span>Total</span><strong>{money(lineTotal(line))}</strong></div></Col>
+          <Col md={12}><Form.Label>Observações internas da linha</Form.Label><Form.Control as="textarea" rows={2} value={line.notes || ""} onChange={(event) => update({ notes: event.target.value })} /></Col>
+        </Row>
+      </Modal.Body>
+      <Modal.Footer><Button variant="secondary" onClick={onHide}>Cancelar</Button><Button type="submit" disabled={!String(line.description || "").trim()}>Incluir serviço</Button></Modal.Footer>
+    </Form>
+  </Modal>;
+}
+
+function EstimatePartLineModal({ show, onHide, onConfirm, parts, serviceLineOptions }) {
+  const [line, setLine] = useState(emptyPart());
+  const partOptions = useMemo(() => [
+    { value: "", label: "Peça manual", description: "Digite livremente a descrição, quantidade e valor." },
+    ...sortCatalogByUsage(parts || []).map((part) => ({
+      value: part.id,
+      label: [part.sku, part.name].filter(Boolean).join(" - "),
+      description: part.category_name || "Peça cadastrada",
+      meta: `Estoque: ${part.stock_quantity ?? 0} · Venda: ${money(part.sale_price || 0)}`,
+    })),
+  ], [parts]);
+
+  useEffect(() => {
+    if (!show) return;
+    const firstService = (serviceLineOptions || []).find((option) => option.value);
+    setLine({ ...emptyPart(), service_local_id: firstService?.value || "" });
+  }, [show, serviceLineOptions]);
+
+  function update(patch) {
+    setLine((current) => ({ ...current, ...patch }));
+  }
+
+  function selectPart(partId) {
+    const part = (parts || []).find((item) => String(item.id) === String(partId));
+    update(part ? {
+      part_id: String(part.id),
+      description: part.name || "",
+      unit_price: part.sale_price || "0.00",
+      cost_price: part.cost_price || "0.00",
+    } : { part_id: "" });
+  }
+
+  function submit(event) {
+    event.preventDefault();
+    const description = String(line.description || "").trim();
+    if (!description) return;
+    onConfirm({ ...line, description, quantity: line.quantity || "1.00", unit_price: line.unit_price || "0.00", cost_price: line.cost_price || "0.00", discount_percent: line.discount_percent || "0" });
+  }
+
+  return <Modal keyboard={false} backdrop="static" size="lg" show={show} onHide={onHide} dialogClassName="floating-form-modal">
+    <Form onSubmit={submit}>
+      <Modal.Header closeButton><Modal.Title>Incluir peça no orçamento</Modal.Title></Modal.Header>
+      <Modal.Body>
+        <Row className="g-3">
+          <Col md={12}><SearchableSelect label="Serviço vinculado" value={line.service_local_id || ""} options={serviceLineOptions} onChange={(value) => update({ service_local_id: value })} placeholder="Pesquisar serviço vinculado" emptyMessage="Nenhum serviço no orçamento." /></Col>
+          <Col md={12}><SearchableSelect label="Peça do catálogo" value={line.part_id || ""} options={partOptions} onChange={selectPart} placeholder="Pesquisar peça ou manter manual" emptyMessage="Nenhuma peça encontrada." /></Col>
+          <Col md={12}><Form.Label>Descrição para o cliente</Form.Label><Form.Control required value={line.description} onChange={(event) => update({ description: event.target.value })} placeholder="Ex.: Filtro de óleo" /></Col>
+          <Col md={3}><Form.Label>Qtd.</Form.Label><IntegerInput min="0.01" step="0.01" value={line.quantity} onChange={(event) => update({ quantity: event.target.value })} /></Col>
+          <Col md={3}><Form.Label>Unitário</Form.Label><MoneyInput value={line.unit_price} onChange={(value) => update({ unit_price: value })} /></Col>
+          <Col md={3}><Form.Label>Desconto (%)</Form.Label><PercentInput value={line.discount_percent} onChange={(event) => update({ discount_percent: event.target.value })} /></Col>
+          <Col md={3}><div className="finance-total-box total"><span>Total</span><strong>{money(partLineTotal(line))}</strong></div></Col>
+          <Col md={4}><Form.Label>Custo interno</Form.Label><MoneyInput value={line.cost_price} onChange={(value) => update({ cost_price: value })} /></Col>
+          <Col md={8}><Form.Label>Observações internas da linha</Form.Label><Form.Control value={line.notes || ""} onChange={(event) => update({ notes: event.target.value })} /></Col>
+        </Row>
+      </Modal.Body>
+      <Modal.Footer><Button variant="secondary" onClick={onHide}>Cancelar</Button><Button type="submit" disabled={!String(line.description || "").trim()}>Incluir peça</Button></Modal.Footer>
+    </Form>
+  </Modal>;
+}
+
+
 function ReplaceServiceModal({ show, onHide, onConfirm, services, line }) {
   const [selectedId, setSelectedId] = useState("");
   const [quantity, setQuantity] = useState("1.00");
@@ -1196,7 +1318,7 @@ function ReplaceServiceModal({ show, onHide, onConfirm, services, line }) {
             <Col lg={8}>
               <div className="small text-muted mb-1">Serviço atual</div>
               <div className="fw-semibold">{line?.description || "Serviço sem descrição"}</div>
-              <div className="small text-muted">Desconto preservado: {money(line?.discount_amount || 0)} · Total atual: {money(lineTotal(line || {}))}</div>
+              <div className="small text-muted">Desconto preservado: {line?.discount_percent || 0}% · Total atual: {money(lineTotal(line || {}))}</div>
             </Col>
             <Col lg={4}>
               <Form.Label>Quantidade após a troca</Form.Label>
@@ -1266,7 +1388,7 @@ function ReplacePartModal({ show, onHide, onConfirm, parts, line, serviceLineOpt
             <Col lg={4}>
               <div className="small text-muted mb-1">Peça atual</div>
               <div className="fw-semibold">{line?.description || "Peça sem descrição"}</div>
-              <div className="small text-muted">Desconto preservado: {money(line?.discount_amount || 0)} · Total atual: {money(partLineTotal(line || {}))}</div>
+              <div className="small text-muted">Desconto preservado: {line?.discount_percent || 0}% · Total atual: {money(partLineTotal(line || {}))}</div>
             </Col>
             <Col lg={3}>
               <Form.Label>Quantidade após a troca</Form.Label>
@@ -1595,6 +1717,7 @@ export default function EstimateFormPage({ embedded = false, returnTo }) {
   const [serviceCategories, setServiceCategories] = useState([]);
   const [partCategories, setPartCategories] = useState([]);
   const [form, setForm] = useState(emptyEstimate());
+  const [sourceEstimate, setSourceEstimate] = useState(null);
   const [activeTab, setActiveTab] = useState("customer");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -1605,14 +1728,18 @@ export default function EstimateFormPage({ embedded = false, returnTo }) {
   const [includeServiceModal, setIncludeServiceModal] = useState(false);
   const [includePartModal, setIncludePartModal] = useState(false);
   const [includePackageModal, setIncludePackageModal] = useState(false);
+  const [manualServiceModal, setManualServiceModal] = useState(false);
+  const [manualPartModal, setManualPartModal] = useState(false);
   const [replaceServiceLine, setReplaceServiceLine] = useState(null);
   const [replacePartLine, setReplacePartLine] = useState(null);
 
   const vehiclesForCustomer = useMemo(() => vehicles.filter((vehicle) => String(vehicle.customer?.id) === String(form.customer_id)), [vehicles, form.customer_id]);
   const subtotalServices = useMemo(() => form.services.reduce((total, line) => total + lineSubtotal(line), 0), [form.services]);
   const subtotalParts = useMemo(() => form.parts.reduce((total, line) => total + partLineSubtotal(line), 0), [form.parts]);
-  const itemDiscounts = useMemo(() => [...form.services, ...form.parts].reduce((total, line) => total + decimal(line.discount_amount), 0), [form.services, form.parts]);
-  const finalTotal = Math.max(subtotalServices + subtotalParts - itemDiscounts - decimal(form.discount_amount), 0);
+  const itemDiscounts = useMemo(() => form.services.reduce((total, line) => total + lineDiscountAmount(line), 0) + form.parts.reduce((total, line) => total + partDiscountAmount(line), 0), [form.services, form.parts]);
+  const estimateDiscountBase = Math.max(subtotalServices + subtotalParts - itemDiscounts, 0);
+  const generalDiscountAmount = useMemo(() => percentAmount(estimateDiscountBase, form.discount_percent), [estimateDiscountBase, form.discount_percent]);
+  const finalTotal = Math.max(estimateDiscountBase - generalDiscountAmount, 0);
 
   const customerOptions = useMemo(() => contacts.map((contact) => ({ value: contact.id, label: contactName(contact), description: [contact.phone_e164 || "sem telefone", contact.email || "sem email"].join(" · "), meta: contact.document_number ? `CPF/CNPJ: ${contact.document_number}` : "" })), [contacts]);
   const vehicleOptions = useMemo(() => vehiclesForCustomer.map((vehicle) => ({ value: vehicle.id, label: vehicle.display_name || [vehicle.plate, vehicle.model].filter(Boolean).join(" - ") || `Veículo #${vehicle.id}`, description: [vehicle.make || vehicle.brand, vehicle.model, vehicle.year].filter(Boolean).join(" · "), meta: vehicle.plate ? `Placa: ${vehicle.plate}` : "" })), [vehiclesForCustomer]);
@@ -1652,6 +1779,34 @@ export default function EstimateFormPage({ embedded = false, returnTo }) {
 
       if (editing) {
         const { data } = await api.get(`/attendance/estimates/${id}/`);
+        setSourceEstimate(data);
+        const loadedServices = (data.services || []).map((line) => ({
+          ...line,
+          local_id: String(line.id || makeLocalId()),
+          service_id: line.service || line.service_id || "",
+          source_package_id: line.source_package || line.source_package_id || "",
+          source_package_name: line.source_package_name || "",
+          quantity: line.quantity || "1.00",
+          unit_price: line.unit_price || "0.00",
+          discount_percent: percentFromAmount(decimal(line.quantity || "1.00") * decimal(line.unit_price || "0.00"), line.discount_amount || "0.00"),
+        }));
+        const loadedParts = (data.parts || []).map((line) => ({
+          ...line,
+          local_id: String(line.id || makeLocalId()),
+          service_local_id: line.service_item ? String(line.service_item) : "",
+          part_id: line.part || line.part_id || "",
+          quantity: line.quantity || "1.00",
+          unit_price: line.unit_price || "0.00",
+          cost_price: line.cost_price || "0.00",
+          discount_percent: percentFromAmount(decimal(line.quantity || "1.00") * decimal(line.unit_price || "0.00"), line.discount_amount || "0.00"),
+        }));
+        const generalDiscountBase = Math.max(
+          loadedServices.reduce((total, line) => total + lineSubtotal(line), 0)
+          + loadedParts.reduce((total, line) => total + partLineSubtotal(line), 0)
+          - loadedServices.reduce((total, line) => total + lineDiscountAmount(line), 0)
+          - loadedParts.reduce((total, line) => total + partDiscountAmount(line), 0),
+          0,
+        );
         setForm({
           customer_id: data.customer?.id || "",
           vehicle_id: data.vehicle?.id || "",
@@ -1662,11 +1817,12 @@ export default function EstimateFormPage({ embedded = false, returnTo }) {
           customer_notes: data.customer_notes || "",
           valid_until: data.valid_until || dateInputValue(),
           tank_level_percent: String(data.tank_level_percent ?? 0),
-          discount_amount: data.discount_amount || "0.00",
-          services: (data.services || []).map((line) => ({ ...line, local_id: String(line.id || makeLocalId()), service_id: line.service || line.service_id || "", source_package_id: line.source_package || line.source_package_id || "", source_package_name: line.source_package_name || "", quantity: line.quantity || "1.00", unit_price: line.unit_price || "0.00", discount_amount: line.discount_amount || "0.00" })),
-          parts: (data.parts || []).map((line) => ({ ...line, local_id: String(line.id || makeLocalId()), service_local_id: line.service_item ? String(line.service_item) : "", part_id: line.part || line.part_id || "", quantity: line.quantity || "1.00", unit_price: line.unit_price || "0.00", cost_price: line.cost_price || "0.00", discount_amount: line.discount_amount || "0.00" })),
+          discount_percent: percentFromAmount(generalDiscountBase, data.discount_amount || "0.00"),
+          services: loadedServices,
+          parts: loadedParts,
         });
       } else {
+        setSourceEstimate(null);
         setForm(emptyEstimate());
       }
     } catch (err) {
@@ -1676,8 +1832,16 @@ export default function EstimateFormPage({ embedded = false, returnTo }) {
 
   useEffect(() => { loadReferences(); }, [id]);
 
-  function addService() { setForm((current) => ({ ...current, services: [...current.services, emptyService()] })); }
-  function addPart() { setForm((current) => ({ ...current, parts: [...current.parts, emptyPart()] })); }
+  function addService(line) {
+    setForm((current) => ({ ...current, services: [...current.services, { ...emptyService(), ...line, local_id: line.local_id || makeLocalId() }] }));
+    setManualServiceModal(false);
+    setActiveTab("services");
+  }
+  function addPart(line) {
+    setForm((current) => ({ ...current, parts: [...current.parts, { ...emptyPart(), ...line, local_id: line.local_id || makeLocalId() }] }));
+    setManualPartModal(false);
+    setActiveTab("parts");
+  }
   function addSelectedServicesToEstimate(selectedServices) {
     const nextLines = selectedServices.map((service) => ({
       ...emptyService(),
@@ -1686,7 +1850,7 @@ export default function EstimateFormPage({ embedded = false, returnTo }) {
       source_package_name: "",
       description: service.name || service.description || "",
       unit_price: service.default_unit_price || "0.00",
-      discount_amount: "0.00",
+      discount_percent: "0",
     }));
     const nextParts = selectedServices.flatMap((service, index) => defaultPartsForService(service, nextLines[index]?.local_id));
     setForm((current) => ({ ...current, services: [...current.services, ...nextLines], parts: [...current.parts, ...nextParts] }));
@@ -1700,12 +1864,12 @@ export default function EstimateFormPage({ embedded = false, returnTo }) {
       description: part.name || "",
       unit_price: part.sale_price || "0.00",
       cost_price: part.cost_price || "0.00",
-      discount_amount: "0.00",
+      discount_percent: "0",
     }));
     setForm((current) => ({ ...current, parts: [...current.parts, ...nextLines] }));
     setActiveTab("parts");
   }
-  function removeService(localId) { setForm((current) => ({ ...current, services: current.services.filter((line) => line.local_id !== localId), parts: current.parts.map((line) => line.service_local_id === localId ? { ...line, service_local_id: "" } : line) })); }
+  function removeService(localId) { setForm((current) => ({ ...current, services: current.services.filter((line) => line.local_id !== localId), parts: current.parts.filter((line) => line.service_local_id !== localId) })); }
   function removePart(localId) { setForm((current) => ({ ...current, parts: current.parts.filter((line) => line.local_id !== localId) })); }
   function updateService(localId, patch) { setForm((current) => ({ ...current, services: current.services.map((line) => line.local_id === localId ? { ...line, ...patch } : line) })); }
   function updatePart(localId, patch) { setForm((current) => ({ ...current, parts: current.parts.map((line) => line.local_id === localId ? { ...line, ...patch } : line) })); }
@@ -1786,19 +1950,32 @@ export default function EstimateFormPage({ embedded = false, returnTo }) {
       description: item.description || item.service_name || servicePackage.name || "Serviço do combo",
       quantity: item.quantity || "1.00",
       unit_price: item.unit_price || "0.00",
-      discount_amount: "0.00",
+      discount_percent: "0",
       notes: servicePackage.name ? `Combo: ${servicePackage.name}` : "",
     }));
-    const nextParts = packageItems.flatMap((item, index) => {
+    const packageDefaultParts = packageItems.flatMap((item, index) => {
       const service = services.find((candidate) => String(candidate.id) === String(item.service || item.service_id || ""));
       return defaultPartsForService(service, nextLines[index]?.local_id);
     });
-    setForm((current) => ({
-      ...current,
-      discount_amount: (decimal(current.discount_amount) + decimal(servicePackage.discount_amount)).toFixed(2),
-      services: [...current.services, ...nextLines],
-      parts: [...current.parts, ...nextParts],
-    }));
+    setForm((current) => {
+      const nextServices = [...current.services, ...nextLines];
+      const nextParts = [...current.parts, ...packageDefaultParts];
+      const currentServiceSubtotal = current.services.reduce((total, line) => total + lineSubtotal(line), 0);
+      const currentPartSubtotal = current.parts.reduce((total, line) => total + partLineSubtotal(line), 0);
+      const currentItemDiscounts = current.services.reduce((total, line) => total + lineDiscountAmount(line), 0) + current.parts.reduce((total, line) => total + partDiscountAmount(line), 0);
+      const currentBase = Math.max(currentServiceSubtotal + currentPartSubtotal - currentItemDiscounts, 0);
+      const currentGeneralDiscount = percentAmount(currentBase, current.discount_percent);
+      const nextServiceSubtotal = nextServices.reduce((total, line) => total + lineSubtotal(line), 0);
+      const nextPartSubtotal = nextParts.reduce((total, line) => total + partLineSubtotal(line), 0);
+      const nextItemDiscounts = nextServices.reduce((total, line) => total + lineDiscountAmount(line), 0) + nextParts.reduce((total, line) => total + partDiscountAmount(line), 0);
+      const nextBase = Math.max(nextServiceSubtotal + nextPartSubtotal - nextItemDiscounts, 0);
+      return {
+        ...current,
+        discount_percent: percentFromAmount(nextBase, currentGeneralDiscount + decimal(servicePackage.discount_amount)),
+        services: nextServices,
+        parts: nextParts,
+      };
+    });
     setActiveTab("services");
   }
 
@@ -1875,14 +2052,37 @@ export default function EstimateFormPage({ embedded = false, returnTo }) {
     setSaving(true);
     setError("");
     if (!validateBeforeSave()) { setSaving(false); return; }
+    if (editing && sourceEstimate?.can_edit === false) {
+      setError("Orçamento só pode ser editado quando estiver aberto ou recusado.");
+      setSaving(false);
+      return;
+    }
     try {
+      const { discount_percent: _discountPercent, ...formPayload } = form;
       const payload = {
-        ...form,
+        ...formPayload,
         customer_id: Number(form.customer_id),
         vehicle_id: form.vehicle_id ? Number(form.vehicle_id) : null,
         tank_level_percent: Number(form.tank_level_percent || 0),
-        services: form.services.map(({ local_id, service, service_name, source_package, source_package_name, subtotal_amount, total_amount, ...line }) => ({ ...line, local_id, service_id: line.service_id ? Number(line.service_id) : null, source_package_id: line.source_package_id ? Number(line.source_package_id) : null, quantity: line.quantity || "1.00", unit_price: line.unit_price || "0.00", discount_amount: line.discount_amount || "0.00" })),
-        parts: form.parts.map(({ local_id, part, part_name, part_sku, stock_available, subtotal_amount, total_amount, service_item, service_item_description, ...line }) => ({ ...line, service_local_id: line.service_local_id || "", part_id: line.part_id ? Number(line.part_id) : null, quantity: line.quantity || "1.00", unit_price: line.unit_price || "0.00", cost_price: line.cost_price || "0.00", discount_amount: line.discount_amount || "0.00" })),
+        discount_amount: generalDiscountAmount.toFixed(2),
+        services: form.services.map(({ local_id, service, service_name, source_package, source_package_name, subtotal_amount, total_amount, discount_percent, ...line }) => ({
+          ...line,
+          local_id,
+          service_id: line.service_id ? Number(line.service_id) : null,
+          source_package_id: line.source_package_id ? Number(line.source_package_id) : null,
+          quantity: line.quantity || "1.00",
+          unit_price: line.unit_price || "0.00",
+          discount_amount: percentAmount(decimal(line.quantity || "1.00") * decimal(line.unit_price || "0.00"), discount_percent).toFixed(2),
+        })),
+        parts: form.parts.map(({ local_id, part, part_name, part_sku, stock_available, subtotal_amount, total_amount, service_item, service_item_description, discount_percent, ...line }) => ({
+          ...line,
+          service_local_id: line.service_local_id || "",
+          part_id: line.part_id ? Number(line.part_id) : null,
+          quantity: line.quantity || "1.00",
+          unit_price: line.unit_price || "0.00",
+          cost_price: line.cost_price || "0.00",
+          discount_amount: percentAmount(decimal(line.quantity || "1.00") * decimal(line.unit_price || "0.00"), discount_percent).toFixed(2),
+        })),
       };
       if (editing) await api.put(`/attendance/estimates/${id}/`, payload);
       else await api.post("/attendance/estimates/", payload);
@@ -1897,6 +2097,7 @@ export default function EstimateFormPage({ embedded = false, returnTo }) {
   return <>
     {!embedded ? (<><PageHeader title={editing ? "Editar orçamento" : "Novo orçamento"} subtitle="Monte o orçamento por abas: cliente, serviços, peças e resumo financeiro." actions={<Link className="btn btn-outline-secondary" to={returnPath}>Voltar para orçamentos</Link>} /><AreaTabs area="attendance" /></>) : null}
     <ErrorAlert error={error} onClose={() => setError("")} />
+    {editing && sourceEstimate?.can_edit === false ? <Alert variant="warning">Este orçamento não pode ser alterado no status atual. Apenas orçamentos abertos ou recusados podem ser editados.</Alert> : null}
 
     <Form onSubmit={save} noValidate>
       <FormTabs tabs={tabs} activeKey={activeTab} onSelect={setActiveTab} />
@@ -1955,13 +2156,14 @@ export default function EstimateFormPage({ embedded = false, returnTo }) {
               <div>
                 <span className="fw-semibold d-block">Serviços e combos do orçamento</span>
                 <span className="small text-muted">Use cards editáveis: escolha serviço/combo, revise preço e veja peças padrão sugeridas automaticamente.</span>
+                <span className="small text-primary d-block mt-1">Cálculo atualizado: serviços {money(form.services.reduce((total, line) => total + lineTotal(line), 0))} · orçamento {money(finalTotal)}</span>
               </div>
               <div className="d-flex flex-column flex-md-row gap-2 align-items-stretch align-items-md-start">
                 <Button size="sm" variant="outline-primary" type="button" onClick={() => setIncludePackageModal(true)}>Incluir combo</Button>
                 <Button size="sm" variant="outline-primary" type="button" onClick={() => setIncludeServiceModal(true)}>Adicionar serviço</Button>
                 <Button size="sm" variant="outline-secondary" type="button" onClick={() => setQuickPackageModal(true)}>Cadastrar combo</Button>
                 <Button size="sm" variant="outline-secondary" type="button" onClick={() => setQuickServiceModal(true)}>Cadastrar serviço</Button>
-                <Button size="sm" variant="outline-secondary" type="button" onClick={addService}>Serviço manual</Button>
+                <Button size="sm" variant="outline-secondary" type="button" onClick={() => setManualServiceModal(true)}>Serviço manual</Button>
               </div>
             </div>
           </Card.Header>
@@ -1993,7 +2195,7 @@ export default function EstimateFormPage({ embedded = false, returnTo }) {
                       </Col>
                       <Col md={3}><Form.Label>Qtd.</Form.Label><IntegerInput min="0.01" step="0.01" value={line.quantity} onChange={(event) => updateService(line.local_id, { quantity: event.target.value })} /></Col>
                       <Col md={3}><Form.Label>Unitário</Form.Label><MoneyInput value={line.unit_price} onChange={(value) => updateService(line.local_id, { unit_price: value })} /></Col>
-                      <Col md={3}><Form.Label>Desconto</Form.Label><MoneyInput value={line.discount_amount} onChange={(value) => updateService(line.local_id, { discount_amount: value })} /></Col>
+                      <Col md={3}><Form.Label>Desconto (%)</Form.Label><PercentInput value={line.discount_percent} onChange={(event) => updateService(line.local_id, { discount_percent: event.target.value })} /></Col>
                       <Col md={3} className="line-builder-actions"><Button size="sm" variant="outline-primary" type="button" disabled={!services.length} onClick={() => setReplaceServiceLine(line)}>Trocar</Button><Button size="sm" variant="outline-danger" type="button" onClick={() => removeService(line.local_id)}>Remover</Button></Col>
                     </Row>
                   </div>
@@ -2010,11 +2212,12 @@ export default function EstimateFormPage({ embedded = false, returnTo }) {
             <div>
               <span className="fw-semibold d-block">Peças do orçamento</span>
               <span className="small text-muted">Peças podem ser manuais ou vinculadas a um serviço. Peças padrão entram automaticamente ao selecionar serviços configurados.</span>
+              <span className="small text-primary d-block mt-1">Cálculo atualizado: peças {money(form.parts.reduce((total, line) => total + partLineTotal(line), 0))} · orçamento {money(finalTotal)}</span>
             </div>
             <div className="d-flex gap-2">
               <Button size="sm" variant="outline-primary" type="button" onClick={() => setIncludePartModal(true)}>Adicionar peça</Button>
               <Button size="sm" variant="outline-secondary" type="button" onClick={() => setQuickPartModal(true)}>Cadastrar peça</Button>
-              <Button size="sm" variant="outline-secondary" type="button" onClick={addPart}>Peça manual</Button>
+              <Button size="sm" variant="outline-secondary" type="button" onClick={() => setManualPartModal(true)}>Peça manual</Button>
             </div>
           </Card.Header>
           {partsWithoutLinkedService.length > 0 ? <Alert variant="warning" className="m-3 mb-0"><strong>Atenção:</strong> {partsWithoutLinkedService.length} peça(s) estão sem serviço vinculado. Elas ainda podem ser salvas, mas o ideal é vincular cada peça ao serviço correspondente.</Alert> : null}
@@ -2045,7 +2248,7 @@ export default function EstimateFormPage({ embedded = false, returnTo }) {
                     </Col>
                     <Col md={3}><Form.Label>Qtd.</Form.Label><IntegerInput min="0.01" step="0.01" value={line.quantity} onChange={(event) => updatePart(line.local_id, { quantity: event.target.value })} /></Col>
                     <Col md={3}><Form.Label>Unitário</Form.Label><MoneyInput value={line.unit_price} onChange={(value) => updatePart(line.local_id, { unit_price: value })} /></Col>
-                    <Col md={3}><Form.Label>Desconto</Form.Label><MoneyInput value={line.discount_amount} onChange={(value) => updatePart(line.local_id, { discount_amount: value })} /></Col>
+                    <Col md={3}><Form.Label>Desconto (%)</Form.Label><PercentInput value={line.discount_percent} onChange={(event) => updatePart(line.local_id, { discount_percent: event.target.value })} /></Col>
                     <Col md={3} className="line-builder-actions"><Button size="sm" variant="outline-primary" type="button" disabled={!parts.length} onClick={() => setReplacePartLine(line)}>Trocar</Button><Button size="sm" variant="outline-danger" type="button" onClick={() => removePart(line.local_id)}>Remover</Button></Col>
                   </Row>
                 </div>
@@ -2059,7 +2262,7 @@ export default function EstimateFormPage({ embedded = false, returnTo }) {
         <Card className="border-0 shadow-sm mb-3"><Card.Header className="bg-white fw-semibold">Resumo financeiro e observações</Card.Header><Card.Body><Row className="g-3 mb-3">
           <Col md={3}><div className="finance-total-box"><span>Subtotal serviços</span><strong>{money(subtotalServices)}</strong></div></Col>
           <Col md={3}><div className="finance-total-box"><span>Subtotal peças</span><strong>{money(subtotalParts)}</strong></div></Col>
-          <Col md={3}><Form.Label>Desconto geral</Form.Label><MoneyInput value={form.discount_amount} onChange={(value) => setForm({ ...form, discount_amount: value })} /></Col>
+          <Col md={3}><Form.Label>Desconto geral (%)</Form.Label><PercentInput value={form.discount_percent} onChange={(event) => setForm({ ...form, discount_percent: event.target.value })} /><div className="small text-muted mt-1">Equivale a {money(generalDiscountAmount)}</div></Col>
           <Col md={3}><div className="finance-total-box total"><span>Total previsto</span><strong>{money(finalTotal)}</strong></div></Col>
           <Col md={6}>
             <div className="d-flex align-items-center justify-content-between gap-2 mb-1">
@@ -2077,7 +2280,7 @@ export default function EstimateFormPage({ embedded = false, returnTo }) {
           </Col>
         </Row></Card.Body></Card>
       </TabPanel>
-      <TabbedFormFooter tabs={tabs} activeKey={activeTab} onSelect={setActiveTab} onCancel={closeForm} saveLabel={saving ? "Salvando..." : editing ? "Salvar alterações" : "Salvar orçamento"} saveDisabled={saving} />
+      <TabbedFormFooter tabs={tabs} activeKey={activeTab} onSelect={setActiveTab} onCancel={closeForm} saveLabel={saving ? "Salvando..." : editing ? "Salvar alterações" : "Salvar orçamento"} saveDisabled={saving || (editing && sourceEstimate?.can_edit === false)} />
     </Form>
     <QuickCustomerVehicleModal show={quickCustomerVehicleModal} onHide={() => setQuickCustomerVehicleModal(false)} onCreated={handleQuickCustomerVehicleCreated} />
     <QuickServiceModal show={quickServiceModal} onHide={() => setQuickServiceModal(false)} onCreated={handleQuickServiceCreated} categories={serviceCategories} />
@@ -2086,6 +2289,8 @@ export default function EstimateFormPage({ embedded = false, returnTo }) {
     <QuickPackageModal show={quickPackageModal} onHide={() => setQuickPackageModal(false)} onCreated={handleQuickPackageCreated} services={services} />
     <QuickPartModal show={quickPartModal} onHide={() => setQuickPartModal(false)} onCreated={handleQuickPartCreated} categories={partCategories} serviceLineOptions={serviceLineOptions} />
     <IncludePartModal show={includePartModal} onHide={() => setIncludePartModal(false)} onConfirm={addSelectedPartsToEstimate} parts={parts} serviceLineOptions={serviceLineOptions} />
+    <EstimateServiceLineModal show={manualServiceModal} onHide={() => setManualServiceModal(false)} onConfirm={addService} services={services} />
+    <EstimatePartLineModal show={manualPartModal} onHide={() => setManualPartModal(false)} onConfirm={addPart} parts={parts} serviceLineOptions={serviceLineOptions} />
     <ReplaceServiceModal show={Boolean(replaceServiceLine)} onHide={() => setReplaceServiceLine(null)} onConfirm={replaceServiceInEstimate} services={services} line={replaceServiceLine} />
     <ReplacePartModal show={Boolean(replacePartLine)} onHide={() => setReplacePartLine(null)} onConfirm={replacePartInEstimate} parts={parts} line={replacePartLine} serviceLineOptions={serviceLineOptions} />
   </>;

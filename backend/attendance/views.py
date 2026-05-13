@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.db.models import Count, F, Q, Sum
 from django.utils import timezone
 from django.http import HttpResponse
@@ -15,11 +16,13 @@ from workshop.models import Part, WorkOrder
 from .models import CounterSale, Estimate, EstimateCustomerApproval
 from .serializers import (
     CancelCounterSaleSerializer,
+    CancelEstimateSerializer,
     ChangeEstimateStatusSerializer,
     ConvertEstimateSerializer,
     CounterSaleSerializer,
     EstimateCustomerApprovalCreateSerializer,
     EstimateCustomerApprovalDecisionSerializer,
+    ManualEstimateApprovalSerializer,
     EstimateCustomerApprovalPublicSerializer,
     EstimateCustomerApprovalSerializer,
     EstimateSerializer,
@@ -34,6 +37,14 @@ def get_client_ip(request):
     if forwarded:
         return forwarded.split(",")[0].strip()
     return request.META.get("REMOTE_ADDR")
+
+
+def expire_overdue_estimates():
+    today = timezone.localdate()
+    return Estimate.objects.filter(
+        valid_until__lt=today,
+        status__in=[Estimate.Status.OPEN, Estimate.Status.DIAGNOSIS, Estimate.Status.AWAITING_APPROVAL],
+    ).update(status=Estimate.Status.EXPIRED)
 
 
 def build_estimate_approval_public_url(request, approval, frontend_base_url=""):
@@ -57,7 +68,7 @@ class AttendanceDashboardView(APIView):
         open_work_order_statuses = [WorkOrder.Status.OPEN, WorkOrder.Status.WAITING_PARTS, WorkOrder.Status.IN_PROGRESS]
         estimate_open_statuses = [Estimate.Status.OPEN, Estimate.Status.DIAGNOSIS, Estimate.Status.AWAITING_APPROVAL]
         sales = CounterSale.objects.select_related("customer").all()
-        estimates = Estimate.objects.select_related("customer", "vehicle", "converted_work_order").all()
+        estimates = Estimate.objects.select_related("customer", "vehicle", "converted_work_order", "revision_work_order").all()
         finalized_sales = sales.filter(status=CounterSale.Status.FINALIZED)
         sales_month = finalized_sales.filter(sold_at__date__gte=month_start).aggregate(total=Sum("total_amount"), paid=Sum("paid_amount"), balance=Sum("balance_amount"))
         estimates_month = estimates.filter(created_at__date__gte=month_start).aggregate(total=Sum("total_amount"))
@@ -161,10 +172,13 @@ class EstimateViewSet(viewsets.ModelViewSet):
         "customer_approvals": "estimates.view",
         "create_customer_approval": "estimates.manage",
         "document": "estimates.view",
+        "manual_approval": "estimates.manage",
+        "cancel": "estimates.manage",
     }
-    queryset = Estimate.objects.select_related("customer", "vehicle", "converted_work_order").prefetch_related("services__service", "parts__part", "parts__service_item", "customer_approvals").all()
+    queryset = Estimate.objects.select_related("customer", "vehicle", "converted_work_order", "revision_work_order").prefetch_related("services__service", "parts__part", "parts__service_item", "customer_approvals").all()
 
     def get_queryset(self):
+        expire_overdue_estimates()
         qs = super().get_queryset()
         search = self.request.query_params.get("search")
         status_value = self.request.query_params.get("status")
@@ -193,6 +207,14 @@ class EstimateViewSet(viewsets.ModelViewSet):
         updated = serializer.save()
         return Response(EstimateSerializer(updated).data)
 
+    @action(detail=True, methods=["post"], url_path="cancel")
+    def cancel(self, request, pk=None):
+        estimate = self.get_object()
+        serializer = CancelEstimateSerializer(data=request.data, context={"estimate": estimate, "actor": request.user})
+        serializer.is_valid(raise_exception=True)
+        updated = serializer.save()
+        return Response(EstimateSerializer(updated, context={"request": request}).data)
+
     @action(detail=True, methods=["post"], url_path="convert-to-work-order")
     def convert_to_work_order(self, request, pk=None):
         estimate = self.get_object()
@@ -213,11 +235,31 @@ class EstimateViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         approval = ensure_pending_estimate_approval(estimate, actor=request.user, expires_days=serializer.validated_data.get("expires_days", 7))
         public_url = build_estimate_approval_public_url(request, approval, frontend_base_url=serializer.validated_data.get("frontend_base_url", ""))
-        email_info = send_estimate_approval_email(approval, public_url)
+        try:
+            email_info = send_estimate_approval_email(approval, public_url)
+        except Exception as exc:  # noqa: BLE001 - mantém o link disponível mesmo se o SMTP falhar
+            email_info = {
+                "email_sent": False,
+                "email_to": approval.customer_email_snapshot or "",
+                "email_backend": getattr(settings, "EMAIL_BACKEND", ""),
+                "email_error": f"Link gerado, mas houve falha ao enviar e-mail: {exc}",
+            }
         data = EstimateCustomerApprovalSerializer(approval).data
         data["public_url"] = public_url
         data["email"] = email_info
         return Response(data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="manual-approval")
+    def manual_approval(self, request, pk=None):
+        estimate = self.get_object()
+        serializer = ManualEstimateApprovalSerializer(data=request.data, context={"estimate": estimate, "actor": request.user})
+        serializer.is_valid(raise_exception=True)
+        approval, work_order = serializer.save()
+        return Response({
+            "approval": EstimateCustomerApprovalSerializer(approval).data,
+            "work_order": WorkOrderDetailSerializer(work_order).data,
+        }, status=status.HTTP_201_CREATED)
+
 
     @action(detail=True, methods=["get"])
     def document(self, request, pk=None):

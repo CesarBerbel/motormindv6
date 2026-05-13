@@ -50,6 +50,7 @@ from ..models import (
     WorkshopServiceChecklistTemplate,
 )
 from ..serializers import (
+    CancelWorkOrderSerializer,
     ChangeWorkOrderStatusSerializer,
     CompleteWorkOrderServiceSerializer,
     GeneralCategorySerializer,
@@ -72,6 +73,7 @@ from ..serializers import (
     WorkOrderMessageSerializer,
     WorkOrderCustomerApprovalCreateSerializer,
     WorkOrderCustomerApprovalDecisionSerializer,
+    WorkOrderManualApprovalSerializer,
     WorkOrderCustomerApprovalPublicSerializer,
     WorkOrderCustomerApprovalSerializer,
     WorkOrderDeliverySignatureCreateSerializer,
@@ -88,7 +90,7 @@ from ..serializers import (
 )
 from ..documents import generate_work_order_pdf
 from ..state_machine import SOURCE_SYSTEM
-from ..services import adjust_part_stock, build_customer_approval_url, change_work_order_status, complete_work_order_service, quality_check_work_order_service, record_event, send_work_order_message, start_work_order_service, technical_move_work_order, trigger_status_notifications
+from ..services import adjust_part_stock, build_customer_approval_url, cancel_work_order, change_work_order_status, complete_work_order_service, quality_check_work_order_service, record_event, send_work_order_message, start_work_order_service, technical_move_work_order, trigger_status_notifications
 
 User = get_user_model()
 logger = logging.getLogger(__name__)

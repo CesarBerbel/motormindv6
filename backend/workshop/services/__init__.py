@@ -10,7 +10,7 @@ from .context import contact_context, money, vehicle_context, work_order_context
 from .events import apply_status_timestamps, record_event
 from .inventory import adjust_part_stock, consume_parts_inventory, reserve_parts_for_work_order, release_work_order_part_reservations
 from .notifications import send_work_order_message, trigger_status_notifications
-from .status import change_work_order_status, technical_move_work_order
+from .status import cancel_work_order, change_work_order_status, technical_move_work_order
 from .technical_services import complete_work_order_service, quality_check_work_order_service, start_work_order_service
 
 __all__ = [

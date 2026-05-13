@@ -11,7 +11,7 @@ from workshop.models import Part, ServicePackage, Vehicle, WorkshopProfile, Work
 from workshop.serializers import PartSerializer, VehicleSerializer, WorkOrderDetailSerializer
 
 from .models import CounterSale, CounterSaleItem, CounterSalePayment, Estimate, EstimateCustomerApproval, EstimatePartItem, EstimateServiceItem
-from .services import cancel_counter_sale, change_estimate_status, convert_estimate_to_work_order, decide_estimate_approval, finalize_counter_sale, register_counter_sale_payment
+from .services import ESTIMATE_EDITABLE_STATUSES, cancel_counter_sale, cancel_estimate, change_estimate_status, convert_estimate_to_work_order, decide_estimate_approval, finalize_counter_sale, manually_approve_estimate, register_counter_sale_payment
 
 User = get_user_model()
 
@@ -46,7 +46,7 @@ class CounterSaleItemSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "part", "part_name", "part_sku", "stock_available", "stock_movement", "subtotal_amount", "total_amount", "created_at", "updated_at"]
+        read_only_fields = ["id", "counter_sale", "part", "part_name", "part_sku", "stock_available", "stock_movement", "subtotal_amount", "total_amount", "created_at", "updated_at"]
 
     def validate(self, attrs):
         part = attrs.get("part")
@@ -125,6 +125,9 @@ class CounterSaleSerializer(serializers.ModelSerializer):
             "balance_amount": receivable.balance_amount,
             "due_date": receivable.due_date,
         }
+
+    def get_can_edit(self, obj):
+        return obj.status in ESTIMATE_EDITABLE_STATUSES
 
     def validate(self, attrs):
         customer = attrs.get("customer", getattr(self.instance, "customer", None))
@@ -266,6 +269,8 @@ class EstimateSerializer(serializers.ModelSerializer):
     services = EstimateServiceItemSerializer(many=True, required=False)
     parts = EstimatePartItemSerializer(many=True, required=False)
     converted_work_order_detail = WorkOrderDetailSerializer(source="converted_work_order", read_only=True)
+    revision_work_order_detail = WorkOrderDetailSerializer(source="revision_work_order", read_only=True)
+    can_edit = serializers.SerializerMethodField()
 
     class Meta:
         model = Estimate
@@ -292,8 +297,14 @@ class EstimateSerializer(serializers.ModelSerializer):
             "approved_at",
             "rejected_at",
             "converted_at",
+            "cancelled_at",
+            "cancelled_by",
+            "cancellation_reason",
             "converted_work_order",
             "converted_work_order_detail",
+            "revision_work_order",
+            "revision_work_order_detail",
+            "can_edit",
             "subtotal_services",
             "subtotal_parts",
             "discount_amount",
@@ -303,17 +314,18 @@ class EstimateSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "number", "customer", "customer_name", "vehicle", "vehicle_display", "status", "status_label", "tank_level_label", "sent_at", "approved_at", "rejected_at", "converted_at", "converted_work_order", "converted_work_order_detail", "subtotal_services", "subtotal_parts", "total_amount", "created_at", "updated_at"]
+        read_only_fields = ["id", "number", "customer", "customer_name", "vehicle", "vehicle_display", "status", "status_label", "tank_level_label", "sent_at", "approved_at", "rejected_at", "converted_at", "cancelled_at", "cancelled_by", "cancellation_reason", "converted_work_order", "converted_work_order_detail", "revision_work_order", "revision_work_order_detail", "can_edit", "subtotal_services", "subtotal_parts", "total_amount", "created_at", "updated_at"]
+
+    def get_can_edit(self, obj):
+        return obj.status in ESTIMATE_EDITABLE_STATUSES
 
     def validate(self, attrs):
         customer = attrs.get("customer", getattr(self.instance, "customer", None))
         vehicle = attrs.get("vehicle", getattr(self.instance, "vehicle", None))
         if vehicle and customer and vehicle.customer_id != customer.id:
             raise serializers.ValidationError({"vehicle_id": "O veículo informado pertence a outro cliente."})
-        if self.instance and self.instance.status not in {Estimate.Status.OPEN, Estimate.Status.DIAGNOSIS, Estimate.Status.AWAITING_APPROVAL}:
-            blocked = set(attrs.keys()) - {"internal_notes", "customer_notes"}
-            if blocked:
-                raise serializers.ValidationError("Orçamento aprovado, rejeitado, convertido ou cancelado não pode ser editado, exceto observações.")
+        if self.instance and self.instance.status not in ESTIMATE_EDITABLE_STATUSES:
+            raise serializers.ValidationError("Orçamento só pode ser editado quando estiver aberto ou recusado. Orçamento em diagnóstico, aguardando aprovação, aprovado, expirado, convertido ou cancelado não pode ser alterado.")
         return attrs
 
     def _sync_services(self, estimate, services_data):
@@ -384,11 +396,61 @@ class ChangeEstimateStatusSerializer(serializers.Serializer):
             raise serializers.ValidationError(exc.messages if hasattr(exc, "messages") else str(exc))
 
 
+class CancelEstimateSerializer(serializers.Serializer):
+    reason = serializers.CharField(min_length=5, max_length=1000, trim_whitespace=True)
+    send_notifications = serializers.BooleanField(default=True)
+
+    def save(self, **kwargs):
+        try:
+            return cancel_estimate(
+                self.context["estimate"],
+                actor=self.context.get("actor"),
+                reason=self.validated_data["reason"],
+                send_notifications=self.validated_data.get("send_notifications", True),
+            )
+        except DjangoValidationError as exc:
+            if hasattr(exc, "message_dict"):
+                raise serializers.ValidationError(exc.message_dict)
+            raise serializers.ValidationError(exc.messages if hasattr(exc, "messages") else str(exc))
+
+
 class ConvertEstimateSerializer(serializers.Serializer):
     def save(self, **kwargs):
         try:
             return convert_estimate_to_work_order(self.context["estimate"], actor=self.context.get("actor"))
         except DjangoValidationError as exc:
+            raise serializers.ValidationError(exc.messages if hasattr(exc, "messages") else str(exc))
+
+
+class ManualEstimateApprovalSerializer(serializers.Serializer):
+    approval_type = serializers.ChoiceField(choices=[("total", "Total"), ("partial", "Parcial")], default="total")
+    selected_service_ids = serializers.ListField(child=serializers.IntegerField(min_value=1), required=False, allow_empty=True)
+    selected_part_ids = serializers.ListField(child=serializers.IntegerField(min_value=1), required=False, allow_empty=True)
+    notes = serializers.CharField(required=True, allow_blank=False)
+    signature_name = serializers.CharField(required=False, allow_blank=True, max_length=180)
+    signature_document = serializers.CharField(required=False, allow_blank=True, max_length=30)
+
+    def validate_notes(self, value):
+        value = (value or "").strip()
+        if not value:
+            raise serializers.ValidationError("Informe uma observação para registrar a aprovação manual.")
+        return value
+
+    def save(self, **kwargs):
+        try:
+            return manually_approve_estimate(
+                self.context["estimate"],
+                actor=self.context.get("actor"),
+                approval_type=self.validated_data.get("approval_type", "total"),
+                selected_service_ids=self.validated_data.get("selected_service_ids"),
+                selected_part_ids=self.validated_data.get("selected_part_ids"),
+                notes=self.validated_data.get("notes", ""),
+                signature_name=self.validated_data.get("signature_name", ""),
+                signature_document=self.validated_data.get("signature_document", ""),
+            )
+        except DjangoValidationError as exc:
+            if hasattr(exc, "message_dict"):
+                raise serializers.ValidationError(exc.message_dict)
             raise serializers.ValidationError(exc.messages if hasattr(exc, "messages") else str(exc))
 
 

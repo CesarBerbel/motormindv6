@@ -134,7 +134,7 @@ class TechnicalDashboardView(APIView):
     def _estimate_queryset(self, request):
         from attendance.models import Estimate
 
-        qs = Estimate.objects.select_related("customer", "vehicle", "converted_work_order").filter(
+        qs = Estimate.objects.select_related("customer", "vehicle", "converted_work_order", "revision_work_order").filter(
             status__in=[Estimate.Status.OPEN, Estimate.Status.DIAGNOSIS, Estimate.Status.AWAITING_APPROVAL]
         )
         search = request.query_params.get("search")

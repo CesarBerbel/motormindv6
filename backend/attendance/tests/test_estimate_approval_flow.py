@@ -2,11 +2,13 @@ from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.core import mail
+from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
+from django.utils import timezone
 
 from attendance.models import Estimate, EstimatePartItem, EstimateServiceItem
 from attendance.serializers import EstimateCustomerApprovalPublicSerializer
-from attendance.services import change_estimate_status, decide_estimate_approval, ensure_pending_estimate_approval
+from attendance.services import change_estimate_status, create_revision_estimate_from_work_order, decide_estimate_approval, ensure_pending_estimate_approval, manually_approve_estimate
 from messaging.models import ChannelConfiguration, Contact, MessageLog, MessageTemplate
 from purchasing.models import PurchaseOrder
 from workshop.models import Part, PartStockMovement, ServicePackage, ServicePackageItem, Vehicle, WorkOrder, WorkOrderMessage, WorkOrderNotificationRule, WorkOrderEvent, WorkOrderPart, ServiceDefaultPart, WorkshopProfile, WorkshopService
@@ -105,6 +107,66 @@ class EstimateCustomerApprovalFlowTests(TestCase):
         self.assertEqual(self.estimate_part_one.total_amount, Decimal("800.0000"))
         self.assertEqual(self.estimate.subtotal_parts, Decimal("880.00"))
         self.assertNotEqual(self.estimate_part_one.total_amount, Decimal("2800.00"))
+
+    def test_estimate_items_can_only_change_when_open_or_rejected(self):
+        self.estimate.status = Estimate.Status.AWAITING_APPROVAL
+        self.estimate.save(update_fields=["status", "updated_at"])
+
+        self.estimate_service_one.unit_price = Decimal("199.00")
+        with self.assertRaises(ValidationError):
+            self.estimate_service_one.save()
+
+        self.estimate.status = Estimate.Status.REJECTED
+        self.estimate.save(update_fields=["status", "updated_at"])
+        self.estimate_service_one.unit_price = Decimal("199.00")
+        self.estimate_service_one.save()
+        self.estimate_service_one.refresh_from_db()
+        self.assertEqual(self.estimate_service_one.unit_price, Decimal("199.00"))
+
+    def test_approved_work_order_generates_revision_estimate_and_reopens_existing_order(self):
+        approval = ensure_pending_estimate_approval(self.estimate, actor=self.user)
+        _updated_approval, work_order = decide_estimate_approval(
+            approval,
+            "approved",
+            selected_service_ids=[self.estimate_service_one.id],
+            selected_part_ids=[self.estimate_part_one.id],
+            name="Cliente Orcamento",
+            document="12345678909",
+            notes="Aprovo o orçamento inicial.",
+            confirm_partial=True,
+            actor=self.user,
+        )
+        self.assertEqual(WorkOrder.objects.count(), 1)
+        work_order.status = WorkOrder.Status.IN_PROGRESS
+        work_order.approved_at = timezone.now()
+        work_order.save(update_fields=["status", "approved_at", "updated_at"])
+
+        revision = create_revision_estimate_from_work_order(
+            work_order,
+            payload={"title": "Revisão aprovada pelo cliente"},
+            actor=self.user,
+        )
+        self.assertEqual(revision.revision_work_order, work_order)
+        self.assertEqual(revision.status, Estimate.Status.OPEN)
+        self.assertEqual(revision.services.count(), 1)
+
+        _manual_approval, reopened_order = manually_approve_estimate(
+            revision,
+            actor=self.user,
+            approval_type="total",
+            signature_name="Cliente Orcamento",
+            signature_document="12345678909",
+            notes="Aprovação manual da revisão.",
+        )
+
+        self.assertEqual(reopened_order.id, work_order.id)
+        self.assertEqual(WorkOrder.objects.count(), 1)
+        work_order.refresh_from_db()
+        revision.refresh_from_db()
+        self.assertEqual(work_order.status, WorkOrder.Status.OPEN)
+        self.assertEqual(work_order.source_estimate_id, revision.id)
+        self.assertEqual(revision.status, Estimate.Status.CONVERTED)
+        self.assertEqual(revision.revision_work_order, work_order)
 
     def test_partial_estimate_approval_generates_open_work_order_only_with_selected_items(self):
         approval = ensure_pending_estimate_approval(self.estimate, actor=self.user)

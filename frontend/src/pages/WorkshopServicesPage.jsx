@@ -13,6 +13,7 @@ import SearchableSelect from "../components/SearchableSelect";
 import { money } from "../workshopOptions";
 import SearchAutocompleteInput from "../components/SearchAutocompleteInput";
 import { confirmDialog } from "../components/ConfirmDialog";
+import { makeLocalId } from "../utils/localId";
 
 const empty = () => ({
   code: "",
@@ -70,6 +71,19 @@ function serviceSearchSuggestion(service) {
 
 function buildServiceSearchSuggestions(services) {
   return (services || []).map(serviceSearchSuggestion);
+}
+
+function decimal(value) {
+  const parsed = Number(value || 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function defaultPartTotal(item) {
+  return Math.max(decimal(item.quantity || "1.00") * decimal(item.unit_price || "0.00") - decimal(item.discount_amount || "0.00"), 0);
+}
+
+function isDraftItem(item) {
+  return Boolean(item?.local_only) || String(item?.id || "").startsWith("tmp-");
 }
 
 export default function WorkshopServicesPage() {
@@ -225,15 +239,52 @@ export default function WorkshopServicesPage() {
       const formData = new FormData();
       Object.entries(payload).forEach(([key, value]) => formData.append(key, value ?? ""));
       if (photoFile) formData.append("photo", photoFile);
+
+      let savedServiceId = editing?.id;
       if (editing) {
         await api.put(`/workshop/services/${editing.id}/`, formData);
       } else {
-        await api.post("/workshop/services/", formData);
+        const { data } = await api.post("/workshop/services/", formData);
+        savedServiceId = data?.id;
+        if (savedServiceId) {
+          await persistDraftDefaultParts(savedServiceId);
+          await persistDraftChecklistTemplates(savedServiceId);
+        }
       }
       setShow(false);
       await load();
     } catch (err) {
       setError(apiError(err));
+    }
+  }
+
+  async function persistDraftDefaultParts(serviceId) {
+    for (const item of defaultParts) {
+      await api.post("/workshop/service-default-parts/", {
+        service: serviceId,
+        part_id: Number(item.part || item.part_id),
+        quantity: item.quantity || "1.00",
+        unit_price: item.unit_price || "0.00",
+        discount_amount: item.discount_amount || "0.00",
+        consume_inventory: !!item.consume_inventory,
+        notes: item.notes || "",
+        position: item.position || 0,
+        is_active: item.is_active !== false,
+      });
+    }
+  }
+
+  async function persistDraftChecklistTemplates(serviceId) {
+    for (const item of checklistTemplates) {
+      await api.post("/workshop/service-checklist-templates/", {
+        service: serviceId,
+        description: item.description || "",
+        is_required: !!item.is_required,
+        requires_photo: !!item.requires_photo,
+        requires_note: !!item.requires_note,
+        sort_order: item.sort_order || 0,
+        is_active: item.is_active !== false,
+      });
     }
   }
 
@@ -261,22 +312,42 @@ export default function WorkshopServicesPage() {
   }
 
   async function addDefaultPart() {
-    if (!editing?.id) {
-      setError("Salve o serviço antes de vincular peças padrão.");
-      return;
-    }
     if (!newDefaultPart.part_id) {
       setError("Selecione a peça padrão do serviço.");
       return;
     }
+    const selected = parts.find((part) => String(part.id) === String(newDefaultPart.part_id));
+    const payload = {
+      ...newDefaultPart,
+      part_id: Number(newDefaultPart.part_id),
+      quantity: newDefaultPart.quantity || "1.00",
+      unit_price: newDefaultPart.unit_price || selected?.sale_price || "0.00",
+      discount_amount: newDefaultPart.discount_amount || "0.00",
+      position: newDefaultPart.position || defaultParts.length + 1,
+      is_active: newDefaultPart.is_active !== false,
+    };
+
+    if (!editing?.id) {
+      setDefaultParts((current) => [...current, {
+        ...payload,
+        id: `tmp-${makeLocalId()}`,
+        local_only: true,
+        part: payload.part_id,
+        part_name: selected?.name || "Peça selecionada",
+        part_sku: selected?.sku || "",
+        part_sale_price: selected?.sale_price || payload.unit_price,
+        part_stock_quantity: selected?.stock_quantity ?? 0,
+        part_unit: selected?.unit || "un",
+      }]);
+      setNewDefaultPart({ part_id: "", quantity: "1.00", unit_price: "", discount_amount: "0.00", consume_inventory: true, notes: "", position: defaultParts.length + 1, is_active: true });
+      setError("");
+      return;
+    }
+
     try {
       await api.post("/workshop/service-default-parts/", {
-        ...newDefaultPart,
+        ...payload,
         service: editing.id,
-        part_id: Number(newDefaultPart.part_id),
-        quantity: newDefaultPart.quantity || "1.00",
-        unit_price: newDefaultPart.unit_price || "0.00",
-        discount_amount: newDefaultPart.discount_amount || "0.00",
       });
       setNewDefaultPart({ part_id: "", quantity: "1.00", unit_price: "", discount_amount: "0.00", consume_inventory: true, notes: "", position: defaultParts.length + 1, is_active: true });
       await loadDefaultParts(editing.id);
@@ -286,6 +357,10 @@ export default function WorkshopServicesPage() {
   }
 
   async function updateDefaultPart(item) {
+    if (!editing?.id || isDraftItem(item)) {
+      setDefaultParts((current) => current.map((row) => row.id === item.id ? { ...item } : row));
+      return;
+    }
     try {
       await api.patch(`/workshop/service-default-parts/${item.id}/`, {
         service: editing.id,
@@ -305,6 +380,10 @@ export default function WorkshopServicesPage() {
   }
 
   async function removeDefaultPart(item) {
+    if (isDraftItem(item)) {
+      setDefaultParts((current) => current.filter((row) => row.id !== item.id));
+      return;
+    }
     if (!(await confirmDialog(`Remover peça padrão: ${item.part_sku || ""} ${item.part_name || ""}?`))) return;
     try {
       await api.delete(`/workshop/service-default-parts/${item.id}/`);
@@ -315,10 +394,25 @@ export default function WorkshopServicesPage() {
   }
 
   async function addChecklistTemplate() {
-    if (!editing?.id) {
-      setError("Salve o serviço antes de cadastrar o checklist técnico.");
+    if (!String(newChecklistItem.description || "").trim()) {
+      setError("Informe a descrição do item do checklist.");
       return;
     }
+
+    if (!editing?.id) {
+      setChecklistTemplates((current) => [...current, {
+        ...newChecklistItem,
+        id: `tmp-${makeLocalId()}`,
+        local_only: true,
+        description: String(newChecklistItem.description || "").trim(),
+        sort_order: newChecklistItem.sort_order || current.length + 1,
+        is_active: newChecklistItem.is_active !== false,
+      }]);
+      setNewChecklistItem({ description: "", is_required: true, requires_photo: false, requires_note: false, sort_order: checklistTemplates.length + 1, is_active: true });
+      setError("");
+      return;
+    }
+
     try {
       await api.post("/workshop/service-checklist-templates/", { ...newChecklistItem, service: editing.id });
       setNewChecklistItem({ description: "", is_required: true, requires_photo: false, requires_note: false, sort_order: checklistTemplates.length + 1, is_active: true });
@@ -329,6 +423,10 @@ export default function WorkshopServicesPage() {
   }
 
   async function updateChecklistTemplate(item) {
+    if (!editing?.id || isDraftItem(item)) {
+      setChecklistTemplates((current) => current.map((row) => row.id === item.id ? { ...item } : row));
+      return;
+    }
     try {
       await api.patch(`/workshop/service-checklist-templates/${item.id}/`, item);
       await loadChecklistTemplates(editing.id);
@@ -338,6 +436,10 @@ export default function WorkshopServicesPage() {
   }
 
   async function removeChecklistTemplate(item) {
+    if (isDraftItem(item)) {
+      setChecklistTemplates((current) => current.filter((row) => row.id !== item.id));
+      return;
+    }
     if (!(await confirmDialog(`Excluir item do checklist: ${item.description}?`))) return;
     try {
       await api.delete(`/workshop/service-checklist-templates/${item.id}/`);
@@ -528,8 +630,8 @@ export default function WorkshopServicesPage() {
               <Card.Body>
                 <div className="form-section-title">Peças padrão vinculadas ao serviço</div>
                 <p className="text-muted small mb-3">Quando este serviço for adicionado a um orçamento ou OS, as peças ativas abaixo entram automaticamente como sugestão vinculada ao serviço. O atendente ainda pode ajustar quantidade, preço e desconto antes de salvar.</p>
-                {!editing ? <div className="alert alert-info mb-3">Salve o serviço antes de cadastrar peças padrão.</div> : null}
-                {editing ? <>
+                {!editing ? <div className="alert alert-info mb-3">As peças padrão adicionadas aqui serão gravadas junto com o serviço ao salvar.</div> : null}
+                <>
                   {defaultParts.length ? <div className="line-builder-stack mb-3">
                     {defaultParts.map((item, index) => (
                       <div className="line-builder-card" key={item.id}>
@@ -541,7 +643,7 @@ export default function WorkshopServicesPage() {
                               <div className="line-builder-meta">Estoque: {item.part_stock_quantity ?? 0} {item.part_unit || "un"} · Preço cadastrado: {money(item.part_sale_price || 0)}</div>
                             </div>
                           </div>
-                          <div className="line-builder-total"><span>Total</span><strong>{money(item.total_amount || 0)}</strong></div>
+                          <div className="line-builder-total"><span>Total</span><strong>{money(defaultPartTotal(item))}</strong></div>
                         </div>
                         <Row className="g-3 align-items-end">
                           <Col md={2}><Form.Label>Ordem</Form.Label><IntegerInput value={item.position || 0} onChange={(event) => setDefaultParts((current) => current.map((row) => row.id === item.id ? { ...row, position: event.target.value } : row))} /></Col>
@@ -573,7 +675,7 @@ export default function WorkshopServicesPage() {
                     </Row>
                     <Button type="button" variant="outline-success" className="mt-3" onClick={addDefaultPart}>Adicionar peça padrão</Button>
                   </div>
-                </> : null}
+                </>
               </Card.Body>
             </Card>
           </TabPanel>
@@ -582,8 +684,8 @@ export default function WorkshopServicesPage() {
             <Card className="form-section-card">
               <Card.Body>
                 <div className="form-section-title">Checklist técnico padrão</div>
-                {!editing ? <div className="alert alert-info mb-3">Salve o serviço antes de cadastrar itens de checklist.</div> : null}
-                {editing ? <>
+                {!editing ? <div className="alert alert-info mb-3">Os itens de checklist adicionados aqui serão gravados junto com o serviço ao salvar.</div> : null}
+                <>
                   <Table responsive size="sm" className="align-middle">
                     <thead><tr><th>Ordem</th><th>Descrição</th><th>Obrig.</th><th>Foto</th><th>Obs.</th><th>Ativo</th><th></th></tr></thead>
                     <tbody>
@@ -613,7 +715,7 @@ export default function WorkshopServicesPage() {
                     </Row>
                     <Button type="button" variant="outline-success" className="mt-3" onClick={addChecklistTemplate}>Adicionar item</Button>
                   </div>
-                </> : null}
+                </>
               </Card.Body>
             </Card>
           </TabPanel>

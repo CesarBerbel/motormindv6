@@ -10,13 +10,14 @@ import ErrorAlert from "../components/ErrorAlert";
 import FormTabs, { TabPanel } from "../components/FormTabs";
 import TabbedFormFooter, { InlineTabbedFormFooter } from "../components/TabbedFormFooter";
 import MoneyInput from "../components/MoneyInput";
+import PercentInput from "../components/PercentInput";
 import PageHeader from "../components/PageHeader";
 import { dateInputValue, money, paymentMethods } from "../workshopOptions";
 import { resolveReturnTo } from "../utils/returnTo";
 
 const today = () => dateInputValue();
-const emptySale = () => ({ customer_id: "", customer_name: "Cliente balcão", due_date: today(), discount_amount: "", notes: "", items: [] });
-const emptyLine = () => ({ local_id: makeLocalId(), part_id: "", description: "", quantity: "", unit_price: "", cost_price: "", discount_amount: "", notes: "" });
+const emptySale = () => ({ customer_id: "", customer_name: "Cliente balcão", due_date: today(), discount_percent: "0", notes: "", items: [] });
+const emptyLine = () => ({ local_id: makeLocalId(), part_id: "", description: "", quantity: "", unit_price: "", cost_price: "", discount_percent: "0", notes: "" });
 const emptyPayment = () => ({ receive_now: false, payment_amount: "", payment_method: "cash", payment_reference: "", payment_notes: "" });
 
 function decimal(value) {
@@ -24,7 +25,9 @@ function decimal(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 function lineSubtotal(line) { return decimal(line.quantity) * decimal(line.unit_price); }
-function lineTotal(line) { return Math.max(lineSubtotal(line) - decimal(line.discount_amount), 0); }
+function percentAmount(base, percent) { return Math.max(base * decimal(percent) / 100, 0); }
+function lineDiscountAmount(line) { return percentAmount(lineSubtotal(line), line.discount_percent); }
+function lineTotal(line) { return Math.max(lineSubtotal(line) - lineDiscountAmount(line), 0); }
 
 export default function CounterSaleFormPage({ embedded = false, returnTo }) {
   const navigate = useNavigate();
@@ -41,8 +44,9 @@ export default function CounterSaleFormPage({ embedded = false, returnTo }) {
   const [saving, setSaving] = useState(false);
 
   const subtotal = useMemo(() => form.items.reduce((total, line) => total + lineSubtotal(line), 0), [form.items]);
-  const lineDiscount = useMemo(() => form.items.reduce((total, line) => total + decimal(line.discount_amount), 0), [form.items]);
-  const finalTotal = Math.max(subtotal - lineDiscount - decimal(form.discount_amount), 0);
+  const lineDiscountTotal = useMemo(() => form.items.reduce((total, line) => total + lineDiscountAmount(line), 0), [form.items]);
+  const generalDiscount = useMemo(() => percentAmount(Math.max(subtotal - lineDiscountTotal, 0), form.discount_percent), [subtotal, lineDiscountTotal, form.discount_percent]);
+  const finalTotal = Math.max(subtotal - lineDiscountTotal - generalDiscount, 0);
 
   const tabs = [
     { key: "customer", label: "Cliente", description: "Dados da venda" },
@@ -100,8 +104,11 @@ export default function CounterSaleFormPage({ embedded = false, returnTo }) {
       const payload = {
         ...form,
         customer_id: form.customer_id || null,
-        items: form.items.map(({ local_id, ...line }) => ({ ...line, part_id: line.part_id || null })),
+        customer_name: form.customer_id ? "" : (form.customer_name || "Cliente balcão"),
+        discount_amount: generalDiscount.toFixed(2),
+        items: form.items.map(({ local_id, discount_percent, ...line }) => ({ ...line, part_id: line.part_id || null, discount_amount: lineDiscountAmount({ ...line, discount_percent }).toFixed(2) })),
       };
+      delete payload.discount_percent;
       const { data } = await api.post("/attendance/counter-sales/", payload);
       if (finalizeAfterSave) {
         await api.post(`/attendance/counter-sales/${data.id}/finalize/`, {
@@ -142,22 +149,22 @@ export default function CounterSaleFormPage({ embedded = false, returnTo }) {
             <Row className="g-3">
               <Col md={4}>
                 <Form.Label>Cliente cadastrado</Form.Label>
-                <Form.Select value={form.customer_id} onChange={(event) => setForm({ ...form, customer_id: event.target.value })}>
+                <Form.Select value={form.customer_id} onChange={(event) => setForm({ ...form, customer_id: event.target.value, customer_name: event.target.value ? "" : "Cliente balcão" })}>
                   <option value="">Cliente balcão / não cadastrado</option>
                   {contacts.map((contact) => <option key={contact.id} value={contact.id}>{contact.full_name}</option>)}
                 </Form.Select>
               </Col>
-              <Col md={4}>
+              {!form.customer_id && <Col md={4}>
                 <Form.Label>Nome do cliente balcão</Form.Label>
-                <Form.Control value={form.customer_name} onChange={(event) => setForm({ ...form, customer_name: event.target.value })} />
-              </Col>
+                <Form.Control value={form.customer_name} onChange={(event) => setForm({ ...form, customer_name: event.target.value })} placeholder="Cliente balcão" />
+              </Col>}
               <Col md={2}>
                 <Form.Label>Vencimento</Form.Label>
                 <DateInput value={form.due_date} onChange={(event) => setForm({ ...form, due_date: event.target.value })} />
               </Col>
               <Col md={2}>
-                <Form.Label>Desconto geral</Form.Label>
-                <MoneyInput value={form.discount_amount} onChange={(value) => setForm({ ...form, discount_amount: value })} />
+                <Form.Label>Desconto geral (%)</Form.Label>
+                <PercentInput value={form.discount_percent} onChange={(event) => setForm({ ...form, discount_percent: event.target.value })} />
               </Col>
               <Col md={12}>
                 <Form.Label>Observações</Form.Label>
@@ -176,7 +183,7 @@ export default function CounterSaleFormPage({ embedded = false, returnTo }) {
           </Card.Header>
           <Card.Body className="p-0">
             <Table responsive bordered className="mb-0 align-middle">
-              <thead><tr><th style={{ minWidth: 260 }}>Peça</th><th>Descrição</th><th>Qtd</th><th>Unitário</th><th>Desconto</th><th>Total</th><th></th></tr></thead>
+              <thead><tr><th style={{ minWidth: 260 }}>Peça</th><th>Descrição</th><th>Qtd</th><th>Unitário</th><th>Desconto %</th><th>Total</th><th></th></tr></thead>
               <tbody>
                 {form.items.length === 0 && <tr><td colSpan={7} className="text-center text-muted py-4">Nenhuma peça adicionada.</td></tr>}
                 {form.items.map((line) => <tr key={line.local_id}>
@@ -184,7 +191,7 @@ export default function CounterSaleFormPage({ embedded = false, returnTo }) {
                   <td><Form.Control required value={line.description} onChange={(event) => updateLine(line.local_id, { description: event.target.value })} /></td>
                   <td><IntegerInput required min="0.01" step="0.01" value={line.quantity} onChange={(event) => updateLine(line.local_id, { quantity: event.target.value })} /></td>
                   <td><MoneyInput value={line.unit_price} onChange={(value) => updateLine(line.local_id, { unit_price: value })} /></td>
-                  <td><MoneyInput value={line.discount_amount} onChange={(value) => updateLine(line.local_id, { discount_amount: value })} /></td>
+                  <td><PercentInput value={line.discount_percent} onChange={(event) => updateLine(line.local_id, { discount_percent: event.target.value })} /></td>
                   <td>{money(lineTotal(line))}</td>
                   <td><Button size="sm" variant="outline-danger" type="button" onClick={() => removeLine(line.local_id)}>Remover</Button></td>
                 </tr>)}
@@ -197,7 +204,7 @@ export default function CounterSaleFormPage({ embedded = false, returnTo }) {
       <TabPanel activeKey={activeTab} eventKey="payment">
         <Row className="g-3 mb-3">
           <Col md={3}><div className="finance-total-box"><span>Subtotal</span><strong>{money(subtotal)}</strong></div></Col>
-          <Col md={3}><div className="finance-total-box"><span>Descontos</span><strong>{money(lineDiscount + decimal(form.discount_amount))}</strong></div></Col>
+          <Col md={3}><div className="finance-total-box"><span>Descontos</span><strong>{money(lineDiscountTotal + generalDiscount)}</strong></div></Col>
           <Col md={3}><div className="finance-total-box total"><span>Total da venda</span><strong>{money(finalTotal)}</strong></div></Col>
           <Col md={3}><div className="finance-total-box"><span>Saldo se não receber agora</span><strong>{money(finalTotal)}</strong></div></Col>
         </Row>

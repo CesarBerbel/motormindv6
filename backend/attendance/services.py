@@ -5,6 +5,7 @@ from django.core.exceptions import ValidationError
 from django.core.mail import send_mail
 from django.db import transaction
 from django.utils import timezone
+from django.utils.dateparse import parse_date, parse_datetime
 
 from accounts.url_utils import get_frontend_base_url
 
@@ -18,6 +19,8 @@ from workshop.models import WorkOrderEvent
 from .models import CounterSale, CounterSalePayment, Estimate, EstimateCustomerApproval
 
 ZERO = Decimal("0.00")
+ESTIMATE_EDITABLE_STATUSES = {Estimate.Status.OPEN, Estimate.Status.REJECTED}
+ESTIMATE_APPROVAL_REQUEST_STATUSES = {Estimate.Status.OPEN, Estimate.Status.REJECTED, Estimate.Status.AWAITING_APPROVAL}
 
 
 def _actor_or_none(actor):
@@ -166,6 +169,77 @@ def cancel_counter_sale(counter_sale, actor=None, reason=""):
 
 
 @transaction.atomic
+def manually_approve_estimate(estimate, actor=None, approval_type="total", selected_service_ids=None, selected_part_ids=None, notes="", signature_name="", signature_document=""):
+    obj = Estimate.objects.select_for_update(of=("self",)).select_related("customer", "vehicle").prefetch_related("services", "parts").get(pk=estimate.pk)
+    if obj.status not in ESTIMATE_APPROVAL_REQUEST_STATUSES:
+        raise ValidationError("Somente orçamento aberto, recusado ou aguardando aprovação pode receber aprovação manual.")
+    notes = (notes or "").strip()
+    if not notes:
+        raise ValidationError({"notes": "Informe uma observação para registrar a aprovação manual."})
+    services = list(obj.services.all())
+    parts = list(obj.parts.all())
+    all_service_ids = {item.id for item in services}
+    all_part_ids = {item.id for item in parts}
+    if not all_service_ids:
+        raise ValidationError("Inclua pelo menos um serviço no orçamento antes de aprovar manualmente.")
+
+    if approval_type == "partial":
+        selected_service_ids = {int(item_id) for item_id in (selected_service_ids or [])}
+        selected_part_ids = {int(item_id) for item_id in (selected_part_ids or [])}
+        if not selected_service_ids:
+            raise ValidationError({"selected_service_ids": "Selecione pelo menos um serviço para aprovação parcial."})
+    else:
+        selected_service_ids = set(all_service_ids)
+        selected_part_ids = set(all_part_ids)
+
+    invalid_services = selected_service_ids - all_service_ids
+    invalid_parts = selected_part_ids - all_part_ids
+    if invalid_services or invalid_parts:
+        raise ValidationError("A seleção contém itens que não pertencem a este orçamento.")
+
+    linked_parts = {item.id for item in parts if item.service_item_id and item.service_item_id in selected_service_ids}
+    orphan_parts = {item.id for item in parts if not item.service_item_id}
+    selected_part_ids = selected_part_ids & (linked_parts | orphan_parts)
+    is_partial = selected_service_ids != all_service_ids or selected_part_ids != all_part_ids
+    now = timezone.now()
+    actor_name = ""
+    if getattr(actor, "is_authenticated", False):
+        actor_name = (actor.get_full_name() or actor.get_username() or str(actor)).strip()
+    decision_name = (signature_name or actor_name or "Aprovação manual").strip()[:180]
+    audit_note = f"Aprovação manual {'parcial' if is_partial else 'total'} registrada"
+    if actor_name:
+        audit_note += f" por {actor_name} em {timezone.localtime(now).strftime('%d/%m/%Y %H:%M')}"
+    if signature_name:
+        audit_note += f" com assinatura/confirmação do cliente {signature_name.strip()}"
+    full_notes = f"{notes}\n{audit_note}".strip()
+
+    approval = EstimateCustomerApproval.objects.create(
+        estimate=obj,
+        requested_by=_actor_or_none(actor),
+        expires_at=now,
+    )
+    approval.status = EstimateCustomerApproval.Status.PARTIALLY_APPROVED if is_partial else EstimateCustomerApproval.Status.APPROVED
+    approval.decision_selected_services = sorted(selected_service_ids)
+    approval.decision_selected_parts = sorted(selected_part_ids)
+    approval.decision_name = decision_name
+    approval.decision_document = (signature_document or "")[:30]
+    approval.decision_notes = full_notes
+    approval.decided_at = now
+    approval.save(update_fields=["status", "decision_selected_services", "decision_selected_parts", "decision_name", "decision_document", "decision_notes", "decided_at", "updated_at"])
+
+    obj.status = Estimate.Status.PARTIALLY_APPROVED if is_partial else Estimate.Status.APPROVED
+    obj.approved_at = now
+    obj.updated_by = _actor_or_none(actor) or obj.updated_by
+    obj.services.update(approved_by_customer=False, customer_decided_at=now)
+    obj.parts.update(approved_by_customer=False, customer_decided_at=now)
+    obj.services.filter(id__in=selected_service_ids).update(approved_by_customer=True, customer_decided_at=now)
+    obj.parts.filter(id__in=selected_part_ids).update(approved_by_customer=True, customer_decided_at=now)
+    obj.save(update_fields=["status", "approved_at", "updated_by", "updated_at"])
+    work_order = convert_estimate_to_work_order(obj, actor=actor, selected_service_ids=selected_service_ids, selected_part_ids=selected_part_ids, approval=approval)
+    return approval, work_order
+
+
+@transaction.atomic
 def change_estimate_status(estimate, status, actor=None, note="", send_notifications=True):
     obj = Estimate.objects.select_for_update(of=("self",)).get(pk=estimate.pk)
     if obj.status == Estimate.Status.CONVERTED:
@@ -177,7 +251,7 @@ def change_estimate_status(estimate, status, actor=None, note="", send_notificat
         Estimate.Status.AWAITING_APPROVAL: {Estimate.Status.DIAGNOSIS, Estimate.Status.APPROVED, Estimate.Status.PARTIALLY_APPROVED, Estimate.Status.REJECTED, Estimate.Status.EXPIRED, Estimate.Status.CANCELLED},
         Estimate.Status.APPROVED: {Estimate.Status.CONVERTED},
         Estimate.Status.PARTIALLY_APPROVED: {Estimate.Status.CONVERTED},
-        Estimate.Status.REJECTED: set(),
+        Estimate.Status.REJECTED: {Estimate.Status.OPEN, Estimate.Status.AWAITING_APPROVAL, Estimate.Status.CANCELLED},
         Estimate.Status.EXPIRED: {Estimate.Status.DIAGNOSIS, Estimate.Status.CANCELLED},
         Estimate.Status.CANCELLED: set(),
     }
@@ -195,6 +269,40 @@ def change_estimate_status(estimate, status, actor=None, note="", send_notificat
         obj.internal_notes = (obj.internal_notes + "\n" if obj.internal_notes else "") + note
     obj.updated_by = _actor_or_none(actor) or obj.updated_by
     obj.save(update_fields=["status", "sent_at", "approved_at", "rejected_at", "internal_notes", "updated_by", "updated_at"])
+    if send_notifications and old_status != obj.status:
+        transaction.on_commit(lambda: trigger_estimate_status_notifications(Estimate.objects.select_related("customer", "vehicle").get(pk=obj.pk), actor=actor))
+    return obj
+
+
+@transaction.atomic
+def cancel_estimate(estimate, actor=None, reason="", send_notifications=True):
+    obj = Estimate.objects.select_for_update(of=("self",)).get(pk=estimate.pk)
+    reason = (reason or "").strip()
+    if len(reason) < 5:
+        raise ValidationError({"reason": "Informe uma justificativa com pelo menos 5 caracteres para cancelar o orçamento."})
+    if obj.status == Estimate.Status.CANCELLED:
+        return obj
+    if obj.status == Estimate.Status.CONVERTED:
+        raise ValidationError("Orçamento convertido em OS não pode ser cancelado. Cancele a OS vinculada, se necessário.")
+    if obj.status in {Estimate.Status.APPROVED, Estimate.Status.PARTIALLY_APPROVED}:
+        raise ValidationError("Orçamento aprovado não pode ser cancelado diretamente. Converta em OS ou registre a recusa antes de cancelar.")
+    now = timezone.now()
+    actor_name = ""
+    if getattr(actor, "is_authenticated", False):
+        actor_name = (actor.get_full_name() or actor.get_username() or str(actor)).strip()
+    audit_line = f"Cancelado em {timezone.localtime(now).strftime('%d/%m/%Y %H:%M')}"
+    if actor_name:
+        audit_line += f" por {actor_name}"
+    audit_line += f". Justificativa: {reason}"
+    old_status = obj.status
+    obj.status = Estimate.Status.CANCELLED
+    obj.cancelled_at = now
+    obj.cancelled_by = _actor_or_none(actor)
+    obj.cancellation_reason = reason
+    obj.internal_notes = (obj.internal_notes + "\n" if obj.internal_notes else "") + audit_line
+    obj.updated_by = _actor_or_none(actor) or obj.updated_by
+    obj.save(update_fields=["status", "cancelled_at", "cancelled_by", "cancellation_reason", "internal_notes", "updated_by", "updated_at"])
+    EstimateCustomerApproval.objects.filter(estimate=obj, status=EstimateCustomerApproval.Status.PENDING, is_active=True).update(is_active=False, updated_at=now)
     if send_notifications and old_status != obj.status:
         transaction.on_commit(lambda: trigger_estimate_status_notifications(Estimate.objects.select_related("customer", "vehicle").get(pk=obj.pk), actor=actor))
     return obj
@@ -237,8 +345,8 @@ def send_estimate_approval_email(approval, public_url):
 @transaction.atomic
 def ensure_pending_estimate_approval(estimate, actor=None, expires_days=7):
     obj = Estimate.objects.select_for_update(of=("self",)).select_related("customer", "vehicle").prefetch_related("services", "parts").get(pk=estimate.pk)
-    if obj.status not in {Estimate.Status.OPEN, Estimate.Status.DIAGNOSIS, Estimate.Status.AWAITING_APPROVAL}:
-        raise ValidationError("Somente orçamento aberto, em diagnóstico ou aguardando aprovação pode gerar link de aprovação.")
+    if obj.status not in ESTIMATE_APPROVAL_REQUEST_STATUSES:
+        raise ValidationError("Somente orçamento aberto, recusado ou aguardando aprovação pode gerar link de aprovação.")
     if not obj.services.exists():
         raise ValidationError("Inclua pelo menos um serviço no orçamento antes de enviar para aprovação.")
     obj.recalculate_totals(save=True)
@@ -490,13 +598,251 @@ def send_estimate_approval_whatsapp_to_workshop(estimate, approval, work_order=N
     )
 
 
+
+
+def _date_from_datetime(value):
+    if not value:
+        return None
+    if hasattr(value, "date"):
+        return value.date()
+    if isinstance(value, str):
+        parsed_dt = parse_datetime(value)
+        if parsed_dt:
+            return parsed_dt.date()
+        parsed_date = parse_date(value)
+        if parsed_date:
+            return parsed_date
+    return None
+
+
+@transaction.atomic
+def create_revision_estimate_from_work_order(work_order, payload=None, actor=None):
+    """Cria um novo orçamento de revisão para uma OS já aprovada.
+
+    A OS aprovada não é alterada diretamente. O orçamento gerado passa pelo
+    mesmo fluxo de aprovação do atendimento; quando aprovado, ele atualiza a OS
+    existente e a recoloca como aberta.
+    """
+    payload = payload or {}
+    order = (
+        WorkOrder.objects.select_for_update(of=("self",))
+        .select_related("customer", "vehicle")
+        .prefetch_related("services__service", "services__source_package", "parts__part", "parts__linked_service")
+        .get(pk=work_order.pk)
+    )
+    editable_statuses = {WorkOrder.Status.OPEN, WorkOrder.Status.IN_PROGRESS, WorkOrder.Status.WAITING_PARTS}
+    if order.status not in editable_statuses:
+        raise ValidationError("Somente OS aberta, em execução ou aguardando peças pode gerar orçamento de revisão.")
+    if not order.approved_at:
+        raise ValidationError("Esta OS ainda não está aprovada. Edite a OS diretamente enquanto ela estiver aberta, em execução ou aguardando peças.")
+
+    title = payload.get("title", order.title) or f"Revisão da OS {order.number}"
+    complaint = payload.get("complaint", order.complaint) or ""
+    diagnosis = payload.get("diagnosis", order.diagnosis) or ""
+    internal_notes = payload.get("internal_notes", order.internal_notes) or ""
+    customer_notes = payload.get("customer_notes", order.customer_notes) or ""
+    promised_at = payload.get("promised_at") or order.promised_at
+    valid_until = _date_from_datetime(promised_at) or (timezone.localdate() + timezone.timedelta(days=7))
+    manual_discount = payload.get("manual_discount_amount", order.manual_discount_amount or ZERO) or ZERO
+
+    estimate = Estimate.objects.create(
+        customer=order.customer,
+        vehicle=order.vehicle,
+        title=title,
+        complaint=complaint,
+        diagnosis=diagnosis,
+        internal_notes=(
+            f"Orçamento de revisão gerado a partir da OS aprovada {order.number}.\n"
+            f"{internal_notes}"
+        ).strip(),
+        customer_notes=customer_notes,
+        status=Estimate.Status.OPEN,
+        valid_until=valid_until,
+        discount_amount=manual_discount,
+        revision_work_order=order,
+        created_by=_actor_or_none(actor),
+        updated_by=_actor_or_none(actor),
+    )
+
+    initial_services = payload.get("initial_service_items") or []
+    if initial_services:
+        for item in initial_services:
+            service = item.get("service") or item.get("service_id")
+            source_package = item.get("source_package") or item.get("source_package_id")
+            estimate.services.create(
+                service=service if hasattr(service, "pk") else None,
+                source_package=source_package if hasattr(source_package, "pk") else None,
+                description=item.get("description") or "Serviço",
+                quantity=item.get("quantity") or Decimal("1.00"),
+                unit_price=item.get("unit_price") or ZERO,
+                discount_amount=item.get("discount_amount") or ZERO,
+                notes=item.get("notes") or "",
+            )
+    else:
+        service_map = {}
+        for line in order.services.all():
+            new_line = estimate.services.create(
+                service=line.service,
+                source_package=line.source_package,
+                description=line.description,
+                quantity=line.quantity,
+                unit_price=line.unit_price,
+                discount_amount=line.discount_amount,
+                notes=line.notes,
+            )
+            service_map[line.id] = new_line
+        for line in order.parts.all():
+            estimate.parts.create(
+                service_item=service_map.get(line.linked_service_id),
+                part=line.part,
+                description=line.description,
+                quantity=line.quantity,
+                unit_price=line.unit_price,
+                cost_price=line.cost_price,
+                discount_amount=line.discount_amount,
+                notes=line.notes,
+            )
+
+    estimate.recalculate_totals(save=True)
+    record_event(
+        order,
+        WorkOrderEvent.EventType.UPDATED,
+        actor=actor,
+        description=f"Gerado orçamento de revisão {estimate.number} para nova aprovação da OS aprovada.",
+        data={"estimate_id": estimate.id, "estimate_number": estimate.number},
+    )
+    return estimate
+
+
+
+
+@transaction.atomic
+def apply_approved_estimate_to_existing_work_order(estimate, actor=None, selected_service_ids=None, selected_part_ids=None, approval=None):
+    obj = (
+        Estimate.objects.select_for_update(of=("self",))
+        .select_related("customer", "vehicle", "revision_work_order")
+        .prefetch_related("services", "parts")
+        .get(pk=estimate.pk)
+    )
+    if not obj.revision_work_order_id:
+        raise ValidationError("Este orçamento não está vinculado a uma OS existente.")
+    work_order = WorkOrder.objects.select_for_update(of=("self",)).get(pk=obj.revision_work_order_id)
+    services = list(obj.services.select_related("service", "source_package"))
+    parts = list(obj.parts.select_related("part", "service_item"))
+    if selected_service_ids is None:
+        selected_service_ids = [item.id for item in services]
+    if selected_part_ids is None:
+        selected_part_ids = [item.id for item in parts]
+    selected_service_ids = {int(item_id) for item_id in selected_service_ids}
+    selected_part_ids = {int(item_id) for item_id in selected_part_ids}
+    selected_services = [item for item in services if item.id in selected_service_ids]
+    if not selected_services:
+        raise ValidationError("A aprovação precisa conter pelo menos um serviço para atualizar a OS.")
+    selected_service_id_set = {item.id for item in selected_services}
+    selected_parts = [
+        item for item in parts
+        if item.id in selected_part_ids and (not item.service_item_id or item.service_item_id in selected_service_id_set)
+    ]
+
+    work_order.customer = obj.customer
+    work_order.vehicle = obj.vehicle
+    work_order.title = obj.title
+    work_order.complaint = obj.complaint
+    work_order.diagnosis = obj.diagnosis
+    work_order.customer_notes = obj.customer_notes
+    work_order.internal_notes = (
+        f"OS atualizada pelo orçamento de revisão aprovado {obj.number}.\n"
+        f"{obj.internal_notes}"
+    ).strip()
+    work_order.manual_discount_amount = obj.discount_amount or ZERO
+    work_order.status = WorkOrder.Status.OPEN
+    work_order.source_estimate_id = obj.id
+    work_order.source_estimate_number = obj.number
+    work_order.updated_by = _actor_or_none(actor) or work_order.updated_by
+    work_order.save(update_fields=[
+        "customer", "vehicle", "title", "complaint", "diagnosis", "customer_notes",
+        "internal_notes", "manual_discount_amount", "status", "source_estimate_id",
+        "source_estimate_number", "updated_by", "updated_at",
+    ])
+
+    work_order.services.all().delete()
+    work_order.parts.all().delete()
+    service_map = {}
+    for item in selected_services:
+        line = WorkOrderService.objects.create(
+            work_order=work_order,
+            service=item.service,
+            source_package=item.source_package,
+            description=item.description,
+            quantity=item.quantity,
+            unit_price=item.unit_price,
+            discount_amount=item.discount_amount,
+            notes=item.notes,
+            status=WorkOrderService.Status.PENDING,
+        )
+        service_map[item.id] = line
+    for item in selected_parts:
+        WorkOrderPart.objects.create(
+            work_order=work_order,
+            linked_service=service_map.get(item.service_item_id),
+            part=item.part,
+            description=item.description,
+            quantity=item.quantity,
+            unit_price=item.unit_price,
+            cost_price=item.cost_price,
+            discount_amount=item.discount_amount,
+            notes=item.notes,
+        )
+    work_order.recalculate_totals(save=True)
+    reservation_summary = reserve_parts_for_work_order(work_order, actor=actor, source_estimate=obj)
+    from purchasing.services import ensure_purchases_for_work_order_shortages
+    purchase_summary = ensure_purchases_for_work_order_shortages(work_order, actor=actor)
+    record_event(
+        work_order,
+        WorkOrderEvent.EventType.UPDATED,
+        actor=actor,
+        description=f"OS reaberta e atualizada pelo orçamento aprovado {obj.number}.",
+        old_status="",
+        new_status=work_order.status,
+        data={
+            "estimate_id": obj.id,
+            "estimate_number": obj.number,
+            "approved_service_ids": sorted(selected_service_ids),
+            "approved_part_ids": sorted(selected_part_ids),
+            "approval_id": getattr(approval, "id", None),
+            "reservation_summary": reservation_summary,
+            "purchase_summary": purchase_summary,
+        },
+    )
+    obj.status = Estimate.Status.CONVERTED
+    obj.converted_at = timezone.now()
+    obj.updated_by = _actor_or_none(actor) or obj.updated_by
+    obj.save(update_fields=["status", "converted_at", "updated_by", "updated_at"])
+    if approval and not EstimateCustomerApproval.objects.filter(generated_work_order=work_order).exclude(pk=approval.pk).exists():
+        approval.generated_work_order = work_order
+        approval.save(update_fields=["generated_work_order", "updated_at"])
+    return work_order
+
+
 @transaction.atomic
 def convert_estimate_to_work_order(estimate, actor=None, selected_service_ids=None, selected_part_ids=None, approval=None):
     obj = Estimate.objects.select_for_update(of=("self",)).select_related("customer", "vehicle").prefetch_related("services", "parts").get(pk=estimate.pk)
     if obj.status not in {Estimate.Status.APPROVED, Estimate.Status.PARTIALLY_APPROVED, Estimate.Status.AWAITING_APPROVAL}:
         raise ValidationError("Somente orçamento aguardando aprovação, aprovado ou aprovado parcialmente pode ser convertido em OS.")
+    if obj.revision_work_order_id:
+        return apply_approved_estimate_to_existing_work_order(obj, actor=actor, selected_service_ids=selected_service_ids, selected_part_ids=selected_part_ids, approval=approval)
     if obj.converted_work_order_id:
-        return obj.converted_work_order
+        existing_order = obj.converted_work_order
+        if existing_order.status != WorkOrder.Status.OPEN:
+            existing_order.status = WorkOrder.Status.OPEN
+            existing_order.updated_by = _actor_or_none(actor) or existing_order.updated_by
+            existing_order.save(update_fields=["status", "updated_by", "updated_at"])
+        if obj.status != Estimate.Status.CONVERTED or not obj.converted_at:
+            obj.status = Estimate.Status.CONVERTED
+            obj.converted_at = obj.converted_at or timezone.now()
+            obj.updated_by = _actor_or_none(actor) or obj.updated_by
+            obj.save(update_fields=["status", "converted_at", "updated_by", "updated_at"])
+        return existing_order
 
     services = list(obj.services.select_related("service", "source_package"))
     parts = list(obj.parts.select_related("part", "service_item"))

@@ -20,6 +20,7 @@ from .catalog import (
 )
 from .vehicles import VehicleSerializer
 from .work_orders import (
+    CancelWorkOrderSerializer,
     WorkOrderServiceChecklistItemSerializer,
     WorkOrderServiceSerializer,
     StartWorkOrderServiceSerializer,
@@ -41,6 +42,7 @@ from .work_orders import (
     WorkOrderCustomerApprovalSerializer,
     WorkOrderCustomerApprovalCreateSerializer,
     WorkOrderCustomerApprovalDecisionSerializer,
+    WorkOrderManualApprovalSerializer,
     WorkOrderCustomerApprovalPublicSerializer,
     ChangeWorkOrderStatusSerializer,
     SendWorkOrderMessageSerializer,
@@ -60,6 +62,7 @@ __all__ = [
     "PartSerializer",
     "PartStockMovementSerializer",
     "StockAdjustmentSerializer",
+    "CancelWorkOrderSerializer",
     "WorkOrderServiceChecklistItemSerializer",
     "WorkOrderServiceSerializer",
     "StartWorkOrderServiceSerializer",
@@ -81,6 +84,7 @@ __all__ = [
     "WorkOrderCustomerApprovalSerializer",
     "WorkOrderCustomerApprovalCreateSerializer",
     "WorkOrderCustomerApprovalDecisionSerializer",
+    "WorkOrderManualApprovalSerializer",
     "WorkOrderCustomerApprovalPublicSerializer",
     "ChangeWorkOrderStatusSerializer",
     "SendWorkOrderMessageSerializer",
