@@ -299,7 +299,7 @@ class PartSerializer(serializers.ModelSerializer):
     class Meta:
         model = Part
         fields = ["id", "sku", "name", "category", "category_id", "category_name", "brand", "brand_normalized_name", "photo", "photo_url", "remove_photo", "location", "unit", "unit_label", "cost_price", "sale_price", "stock_quantity", "reserved_quantity", "available_quantity", "minimum_stock", "is_low_stock", "stock_value", "is_featured", "usage_count", "is_active", "notes", "created_at", "updated_at"]
-        read_only_fields = ["id", "category", "category_name", "brand_normalized_name", "photo_url", "unit_label", "stock_quantity", "reserved_quantity", "available_quantity", "minimum_stock", "is_low_stock", "stock_value", "usage_count", "created_at", "updated_at"]
+        read_only_fields = ["id", "category", "category_name", "brand_normalized_name", "photo_url", "unit_label", "reserved_quantity", "available_quantity", "is_low_stock", "stock_value", "usage_count", "created_at", "updated_at"]
         extra_kwargs = {"sku": {"required": False, "allow_blank": True}}
 
     def get_brand_normalized_name(self, obj):
@@ -343,30 +343,66 @@ class PartSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         validated_data.pop("remove_photo", None)
+        initial_stock_quantity = validated_data.pop("stock_quantity", ZERO) or ZERO
         if not validated_data.get("sku"):
             validated_data["sku"] = Part.generate_sku()
         self._sync_brand(validated_data)
-        return super().create(validated_data)
+        part = super().create(validated_data)
+        if initial_stock_quantity:
+            from ..services.inventory import adjust_part_stock
+
+            request = self.context.get("request")
+            actor = getattr(request, "user", None)
+            adjust_part_stock(
+                part,
+                quantity=initial_stock_quantity,
+                movement_type=PartStockMovement.MovementType.ADJUSTMENT,
+                actor=actor,
+                notes="Ajuste inicial no cadastro da peça",
+                unit_cost=part.cost_price,
+            )
+            part.refresh_from_db()
+        return part
 
     def update(self, instance, validated_data):
         remove_photo = validated_data.pop("remove_photo", False)
+        new_stock_quantity = validated_data.pop("stock_quantity", None)
         if remove_photo and instance.photo:
             instance.photo.delete(save=False)
             validated_data["photo"] = ""
         self._sync_brand(validated_data)
-        return super().update(instance, validated_data)
+        part = super().update(instance, validated_data)
+        if new_stock_quantity is not None:
+            current_stock_quantity = part.stock_quantity or ZERO
+            delta = new_stock_quantity - current_stock_quantity
+            if delta:
+                from ..services.inventory import adjust_part_stock
+
+                request = self.context.get("request")
+                actor = getattr(request, "user", None)
+                adjust_part_stock(
+                    part,
+                    quantity=delta,
+                    movement_type=PartStockMovement.MovementType.ADJUSTMENT,
+                    actor=actor,
+                    notes="Ajuste manual no cadastro da peça",
+                    unit_cost=part.cost_price,
+                )
+                part.refresh_from_db()
+        return part
 
 
 
 
 class PartStockMovementSerializer(serializers.ModelSerializer):
     part_name = serializers.CharField(source="part.name", read_only=True)
+    movement_type_label = serializers.CharField(source="get_movement_type_display", read_only=True)
     work_order_number = serializers.CharField(source="work_order.number", read_only=True)
     actor_name = serializers.SerializerMethodField()
 
     class Meta:
         model = PartStockMovement
-        fields = ["id", "part", "part_name", "movement_type", "quantity", "unit_cost", "work_order", "work_order_number", "notes", "actor_name", "created_at"]
+        fields = ["id", "part", "part_name", "movement_type", "movement_type_label", "quantity", "unit_cost", "work_order", "work_order_number", "notes", "actor_name", "created_at"]
         read_only_fields = fields
 
     def get_actor_name(self, obj):

@@ -32,7 +32,7 @@ export default function StockMovementsPage() {
           <tbody>{items.map((item) => <tr key={item.id}>
             <td>{new Date(item.created_at).toLocaleString("pt-BR")}</td>
             <td>{item.part_name}</td>
-            <td>{item.movement_type}</td>
+            <td>{item.movement_type_label || item.movement_type}</td>
             <td>{item.quantity}</td>
             <td>{money(item.unit_cost)}</td>
             <td>{item.work_order_number || "-"}</td>
