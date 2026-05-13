@@ -1,14 +1,17 @@
 import React, { useEffect, useState } from "react";
 import { Button, Card, Form, Table } from "react-bootstrap";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import api, { apiError, results } from "../api/client";
 import PageHeader from "../components/PageHeader";
 import ErrorAlert from "../components/ErrorAlert";
 import EmptyState from "../components/EmptyState";
 import StatusBadge from "../components/StatusBadge";
 import { confirmDialog } from "../components/ConfirmDialog";
+import { buildReturnToState } from "../utils/returnTo";
 
 export default function TemplatesPage() {
+  const location = useLocation();
+  const returnState = buildReturnToState(location);
   const [items, setItems] = useState([]);
   const [channel, setChannel] = useState("");
   const [error, setError] = useState("");
@@ -37,7 +40,7 @@ export default function TemplatesPage() {
   return (
     <>
       <PageHeader title="Templates" subtitle="Textos parametrizados para email e WhatsApp.">
-        <Button as={Link} to="/templates/new">Novo template</Button>
+        <Button as={Link} to="/templates/new" state={returnState}>Novo template</Button>
       </PageHeader>
       <ErrorAlert error={error} onClose={() => setError("")} />
       <Card className="border-0 shadow-sm mb-3">
@@ -64,7 +67,7 @@ export default function TemplatesPage() {
                     <td>{item.is_active ? "Sim" : "Nao"}</td>
                     <td>{new Date(item.updated_at).toLocaleString("pt-BR")}</td>
                     <td className="text-end">
-                      <Button size="sm" as={Link} to={`/templates/${item.id}`} variant="outline-primary" className="me-2">Editar</Button>
+                      <Button size="sm" as={Link} to={`/templates/${item.id}`} state={returnState} variant="outline-primary" className="me-2">Editar</Button>
                       <Button size="sm" variant="outline-danger" onClick={() => remove(item)}>Excluir</Button>
                     </td>
                   </tr>

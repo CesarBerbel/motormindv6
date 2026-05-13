@@ -1,8 +1,9 @@
 import React, { Suspense, lazy } from "react";
-import { BrowserRouter, Navigate, Route, Routes, useNavigate } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "./auth/AuthContext";
 import { defaultDashboardPath, hasPermission } from "./auth/permissions";
 import { Modal } from "react-bootstrap";
+import { resolveReturnTo } from "./utils/returnTo";
 
 const Layout = lazy(() => import("./components/Layout"));
 const LoginPage = lazy(() => import("./pages/LoginPage"));
@@ -57,6 +58,7 @@ const AuditLogsPage = lazy(() => import("./pages/AuditLogsPage"));
 
 const ReportsExecutivePage = lazy(() => import("./pages/ReportsExecutivePage"));
 const ReportsWorkOrdersPage = lazy(() => import("./pages/ReportsWorkOrdersPage"));
+const ReportsEstimatesPage = lazy(() => import("./pages/ReportsEstimatesPage"));
 const ReportsFinancePage = lazy(() => import("./pages/ReportsFinancePage"));
 const ReportsInventoryPage = lazy(() => import("./pages/ReportsInventoryPage"));
 
@@ -70,12 +72,17 @@ function RouteLoading() {
 
 function FloatingRouteForm({ backTo, title, children }) {
   const navigate = useNavigate();
+  const location = useLocation();
+  const returnTo = resolveReturnTo(location, backTo);
+  const closeForm = () => navigate(returnTo, { replace: true });
+  const formContent = React.isValidElement(children) ? React.cloneElement(children, { returnTo }) : children;
+
   return (
-    <Modal keyboard={false} show size="xl" onHide={() => navigate(backTo)} className="floating-form-modal" dialogClassName="modal-floating-form" backdrop="static">
+    <Modal keyboard={false} show size="xl" onHide={closeForm} className="floating-form-modal" dialogClassName="modal-floating-form" backdrop="static">
       <Modal.Header closeButton>
         <Modal.Title>{title}</Modal.Title>
       </Modal.Header>
-      <Modal.Body>{children}</Modal.Body>
+      <Modal.Body>{formContent}</Modal.Body>
     </Modal>
   );
 }
@@ -136,6 +143,8 @@ export default function App() {
             <Route path="message-dashboard" element={<Guard permission="messaging.manage"><DashboardPage /></Guard>} />
             <Route path="work-orders" element={<Guard permission="work_orders.view"><WorkOrdersPage /></Guard>} />
             <Route path="work-orders/new" element={<Guard permission="work_orders.create"><FloatingRouteForm backTo="/work-orders" title="Nova ordem de serviço"><WorkOrderFormPage embedded /></FloatingRouteForm></Guard>} />
+            <Route path="work-orders/estimates/new" element={<Guard permission="estimates.manage"><FloatingRouteForm backTo="/work-orders" title="Novo orçamento"><EstimateFormPage embedded /></FloatingRouteForm></Guard>} />
+            <Route path="work-orders/estimates/:id/edit" element={<Guard permission="estimates.manage"><FloatingRouteForm backTo="/work-orders" title="Editar orçamento"><EstimateFormPage embedded /></FloatingRouteForm></Guard>} />
             <Route path="work-orders/kanban" element={<Guard permission="work_orders.view"><WorkOrdersKanbanPage /></Guard>} />
             <Route path="work-orders/agenda" element={<Guard permission="work_orders.view"><WorkOrdersAgendaPage /></Guard>} />
             <Route path="work-orders/:id" element={<Guard permission="work_orders.view"><WorkOrderDetailPage /></Guard>} />
@@ -170,6 +179,7 @@ export default function App() {
             <Route path="system/health" element={<Guard permission="settings.manage"><SystemHealthPage /></Guard>} />
             <Route path="reports/executive" element={<Guard permission="reports.view"><ReportsExecutivePage /></Guard>} />
             <Route path="reports/work-orders" element={<Guard permission="reports.view"><ReportsWorkOrdersPage /></Guard>} />
+            <Route path="reports/estimates" element={<Guard permission="reports.view"><ReportsEstimatesPage /></Guard>} />
             <Route path="reports/finance" element={<Guard permission="reports.view"><ReportsFinancePage /></Guard>} />
             <Route path="reports/inventory" element={<Guard permission="reports.view"><ReportsInventoryPage /></Guard>} />
             <Route path="system/audit" element={<Guard permission="settings.manage"><AuditLogsPage /></Guard>} />

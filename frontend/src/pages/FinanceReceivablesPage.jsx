@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Badge, Button, Card, Col, Form, Modal, Row, Table } from "react-bootstrap";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import api, { apiError, results } from "../api/client";
 import EmptyState from "../components/EmptyState";
 import ErrorAlert from "../components/ErrorAlert";
@@ -10,6 +10,7 @@ import AreaTabs from "../components/AreaTabs";
 import { formatDate, money, paymentMethods } from "../workshopOptions";
 import SearchAutocompleteInput from "../components/SearchAutocompleteInput";
 import { buildSearchSuggestions } from "../utils/search";
+import { buildReturnToState } from "../utils/returnTo";
 
 const statusOptions = [
   ["", "Todos"],
@@ -49,6 +50,8 @@ function emptyPayment(balance = "0.00") {
 }
 
 export default function FinanceReceivablesPage() {
+  const location = useLocation();
+  const returnState = buildReturnToState(location);
   const [dashboard, setDashboard] = useState(null);
   const [items, setItems] = useState([]);
   const [search, setSearch] = useState("");
@@ -123,7 +126,7 @@ export default function FinanceReceivablesPage() {
   }
 
   return <>
-    <PageHeader title="Financeiro - contas a receber" subtitle="Contas geradas automaticamente por OS entregue, venda avulsa finalizada ou lançamento financeiro manual." actions={<Link className="btn btn-primary" to="/finance/accounts-receivable/new">Nova conta a receber</Link>} />
+    <PageHeader title="Financeiro - contas a receber" subtitle="Contas geradas automaticamente por OS entregue, venda avulsa finalizada ou lançamento financeiro manual." actions={<Link className="btn btn-primary" to="/finance/accounts-receivable/new" state={returnState}>Nova conta a receber</Link>} />
     <AreaTabs area="finance" />
     <ErrorAlert error={error} onClose={() => setError("")} />
 

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Button, Card, Col, Form, Modal, Row } from "react-bootstrap";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { sanitizeRichHtml } from "../utils/sanitizeHtml";
 import api, { apiError } from "../api/client";
 import ErrorAlert from "../components/ErrorAlert";
@@ -12,6 +12,7 @@ import RichTextEditor from "../components/RichTextEditor";
 import SystemToast from "../components/SystemToast";
 import VariableHelp, { templateVariables } from "../components/VariableHelp";
 import AIAssistButton from "../components/AIAssistButton";
+import { resolveReturnTo } from "../utils/returnTo";
 
 const empty = {
   name: "",
@@ -24,9 +25,12 @@ const empty = {
   is_active: true,
 };
 
-export default function TemplateFormPage({ embedded = false }) {
+export default function TemplateFormPage({ embedded = false, returnTo }) {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const returnPath = returnTo || resolveReturnTo(location, "/templates");
+  const closeForm = () => navigate(returnPath, { replace: true });
   const [form, setForm] = useState(empty);
   const [activeTab, setActiveTab] = useState("identification");
   const [error, setError] = useState("");
@@ -67,10 +71,10 @@ export default function TemplateFormPage({ embedded = false }) {
     try {
       if (id) {
         await api.put(`/templates/${id}/`, payload);
-        navigate("/templates");
+        closeForm();
       } else {
         await api.post("/templates/", payload);
-        navigate("/templates");
+        closeForm();
       }
     } catch (err) {
       setError(apiError(err));
@@ -95,7 +99,7 @@ export default function TemplateFormPage({ embedded = false }) {
     <>
       {!embedded ? (
         <PageHeader title={id ? "Editar template" : "Novo template"} subtitle="Configure modelos de email e WhatsApp com variáveis dinâmicas.">
-          <Button as={Link} to="/templates" variant="outline-secondary">Voltar</Button>
+          <Button as={Link} to={returnPath} variant="outline-secondary">Voltar</Button>
         </PageHeader>
       ) : null}
 
@@ -178,7 +182,7 @@ export default function TemplateFormPage({ embedded = false }) {
                   </Card>
                 </TabPanel>
 
-                <InlineTabbedFormFooter tabs={tabs} activeKey={activeTab} onSelect={setActiveTab} onCancel={() => navigate("/templates")} saveLabel="Salvar template" />
+                <InlineTabbedFormFooter tabs={tabs} activeKey={activeTab} onSelect={setActiveTab} onCancel={closeForm} saveLabel="Salvar template" />
               </Form>
             </Card.Body>
           </Card>

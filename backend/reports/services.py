@@ -8,6 +8,7 @@ from django.http import HttpResponse
 from django.utils import dateparse, timezone
 
 from django.contrib.auth import get_user_model
+from attendance.models import Estimate
 from finance.models import AccountPayable, AccountPayablePayment, AccountReceivable, AccountReceivablePayment, FinancialLedgerEntry
 from workshop.models import (
     Part,
@@ -107,6 +108,54 @@ def apply_work_order_filters(request, qs):
         )
     return qs
 
+
+
+def apply_estimate_filters(request, qs):
+    status = request.query_params.get("status")
+    customer = request.query_params.get("customer")
+    search = (request.query_params.get("search") or "").strip()
+    if status:
+        qs = qs.filter(status=status)
+    if customer:
+        qs = qs.filter(customer_id=customer)
+    if search:
+        qs = qs.filter(
+            Q(number__icontains=search)
+            | Q(title__icontains=search)
+            | Q(complaint__icontains=search)
+            | Q(customer__first_name__icontains=search)
+            | Q(customer__last_name__icontains=search)
+            | Q(customer__trade_name__icontains=search)
+            | Q(vehicle__plate__icontains=search)
+            | Q(vehicle__make__icontains=search)
+            | Q(vehicle__model__icontains=search)
+        )
+    return qs.distinct()
+
+
+def estimate_rows(qs, limit=200):
+    rows = []
+    for estimate in qs.select_related("customer", "vehicle", "converted_work_order", "created_by").order_by("-created_at", "-id")[:limit]:
+        rows.append(
+            {
+                "id": estimate.id,
+                "number": estimate.number,
+                "created_at": timezone.localtime(estimate.created_at).date().isoformat() if estimate.created_at else "",
+                "valid_until": estimate.valid_until.isoformat() if estimate.valid_until else "",
+                "customer_name": estimate.customer.display_name if estimate.customer_id else "",
+                "vehicle_display": estimate.vehicle.display_name if estimate.vehicle_id else "",
+                "title": estimate.title,
+                "status": estimate.status,
+                "status_label": estimate.status_label,
+                "created_by_name": user_label(estimate.created_by),
+                "services_total": estimate.subtotal_services,
+                "parts_total": estimate.subtotal_parts,
+                "discount_total": estimate.discount_amount,
+                "total_amount": estimate.total_amount,
+                "converted_work_order_number": estimate.converted_work_order.number if estimate.converted_work_order_id else "",
+            }
+        )
+    return rows
 
 def work_order_rows(qs, limit=100):
     rows = []
@@ -260,6 +309,34 @@ def work_orders_report(request):
         "rows": work_order_rows(active_qs, limit=200),
     }
 
+
+
+def estimates_report(request):
+    start_date, end_date = default_period(request)
+    qs = queryset_date_range(Estimate.objects.all(), "created_at", start_date, end_date)
+    qs = apply_estimate_filters(request, qs)
+    total_amount = money_sum(qs, "total_amount")
+    count = qs.count()
+    approved_qs = qs.filter(status__in=[Estimate.Status.APPROVED, Estimate.Status.PARTIALLY_APPROVED])
+    converted_qs = qs.filter(status=Estimate.Status.CONVERTED)
+    rejected_qs = qs.filter(status=Estimate.Status.REJECTED)
+    pending_qs = qs.filter(status=Estimate.Status.AWAITING_APPROVAL)
+
+    return {
+        "period": build_period_meta(start_date, end_date),
+        "summary": {
+            "count": count,
+            "total_amount": total_amount,
+            "ticket_average": (total_amount / count) if count else ZERO,
+            "approved_count": approved_qs.count(),
+            "converted_count": converted_qs.count(),
+            "rejected_count": rejected_qs.count(),
+            "pending_approval_count": pending_qs.count(),
+            "approval_rate": round(((approved_qs.count() + converted_qs.count()) / count) * 100, 2) if count else 0,
+        },
+        "status_breakdown": count_by_field(qs, "status", dict(Estimate.Status.choices)),
+        "rows": estimate_rows(qs, limit=250),
+    }
 
 def finance_report(request):
     start_date, end_date = default_period(request)
@@ -415,6 +492,23 @@ def export_work_orders_csv(request):
     ]
     return make_csv_response("relatorio-ordens-servico.csv", ["Número", "Abertura", "Cliente", "Veículo", "Status", "Técnico", "Serviços", "Peças", "Descontos", "Total", "Pago", "Saldo"], rows)
 
+
+
+def export_estimates_csv(request):
+    data = estimates_report(request)
+    rows = [
+        [
+            row["number"], row["created_at"], row["valid_until"], row["customer_name"], row["vehicle_display"],
+            row["title"], row["status_label"], row["created_by_name"], row["services_total"], row["parts_total"],
+            row["discount_total"], row["total_amount"], row["converted_work_order_number"],
+        ]
+        for row in data["rows"]
+    ]
+    return make_csv_response(
+        "relatorio-orcamentos.csv",
+        ["Número", "Criação", "Validade", "Cliente", "Veículo", "Título", "Status", "Criado por", "Serviços", "Peças", "Desconto", "Total", "OS convertida"],
+        rows,
+    )
 
 def export_finance_csv(request):
     data = finance_report(request)

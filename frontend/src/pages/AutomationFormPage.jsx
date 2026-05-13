@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Button, Card, Col, Form, Row } from "react-bootstrap";
 import IntegerInput from "../components/IntegerInput";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import api, { apiError, results } from "../api/client";
 import ErrorAlert from "../components/ErrorAlert";
 import FormTabs, { TabPanel } from "../components/FormTabs";
 import TabbedFormFooter, { InlineTabbedFormFooter } from "../components/TabbedFormFooter";
 import NoticeBox from "../components/NoticeBox";
+import { resolveReturnTo } from "../utils/returnTo";
 import PageHeader from "../components/PageHeader";
 
 function localDateTime(value) {
@@ -41,9 +42,12 @@ const tabs = [
   { key: "status", label: "Status", description: "Ativação" },
 ];
 
-export default function AutomationFormPage({ embedded = false }) {
+export default function AutomationFormPage({ embedded = false, returnTo }) {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const returnPath = returnTo || resolveReturnTo(location, "/automations");
+  const closeForm = () => navigate(returnPath, { replace: true });
   const [form, setForm] = useState(empty);
   const [activeTab, setActiveTab] = useState("message");
   const [templates, setTemplates] = useState([]);
@@ -116,7 +120,7 @@ export default function AutomationFormPage({ embedded = false }) {
     try {
       if (id) await api.put(`/automations/${id}/`, payload);
       else await api.post("/automations/", payload);
-      navigate("/automations");
+      closeForm();
     } catch (err) {
       setError(apiError(err));
     }
@@ -126,7 +130,7 @@ export default function AutomationFormPage({ embedded = false }) {
     <>
       {!embedded ? (
         <PageHeader title={id ? "Editar automação" : "Nova automação"} subtitle="Configure destino, recorrência e template de mensagem.">
-          <Button as={Link} to="/automations" variant="outline-secondary">Voltar</Button>
+          <Button as={Link} to={returnPath} variant="outline-secondary">Voltar</Button>
         </PageHeader>
       ) : null}
       <ErrorAlert error={error} onClose={() => setError("")} />
@@ -260,7 +264,7 @@ export default function AutomationFormPage({ embedded = false }) {
               </Card>
             </TabPanel>
 
-            <InlineTabbedFormFooter tabs={tabs} activeKey={activeTab} onSelect={setActiveTab} onCancel={() => navigate("/automations")} saveLabel="Salvar automação" />
+            <InlineTabbedFormFooter tabs={tabs} activeKey={activeTab} onSelect={setActiveTab} onCancel={closeForm} saveLabel="Salvar automação" />
           </Form>
         </Card.Body>
       </Card>

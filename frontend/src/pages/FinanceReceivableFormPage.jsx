@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Button, Card, Col, Form, Row } from "react-bootstrap";
 import DateInput from "../components/DateInput";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import api, { apiError, results } from "../api/client";
 import AreaTabs from "../components/AreaTabs";
 import ErrorAlert from "../components/ErrorAlert";
@@ -10,6 +10,7 @@ import TabbedFormFooter, { InlineTabbedFormFooter } from "../components/TabbedFo
 import MoneyInput from "../components/MoneyInput";
 import PageHeader from "../components/PageHeader";
 import { dateInputValue, money } from "../workshopOptions";
+import { resolveReturnTo } from "../utils/returnTo";
 import SearchableSelect from "../components/SearchableSelect";
 
 const today = () => dateInputValue();
@@ -28,8 +29,11 @@ function decimal(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-export default function FinanceReceivableFormPage({ embedded = false }) {
+export default function FinanceReceivableFormPage({ embedded = false, returnTo }) {
   const navigate = useNavigate();
+  const location = useLocation();
+  const returnPath = returnTo || resolveReturnTo(location, "/finance/accounts-receivable");
+  const closeForm = () => navigate(returnPath, { replace: true });
   const [contacts, setContacts] = useState([]);
   const [form, setForm] = useState(emptyForm());
   const [activeTab, setActiveTab] = useState("document");
@@ -88,7 +92,7 @@ export default function FinanceReceivableFormPage({ embedded = false }) {
         ...form,
         customer_id: form.customer_id || null,
       });
-      navigate("/finance/accounts-receivable");
+      closeForm();
     } catch (err) {
       setError(apiError(err));
     } finally {
@@ -102,7 +106,7 @@ export default function FinanceReceivableFormPage({ embedded = false }) {
         <PageHeader
           title="Nova conta a receber"
           subtitle="Crie uma cobrança manual organizada por abas para melhorar a conferência antes de salvar."
-          actions={<Link className="btn btn-outline-secondary" to="/finance/accounts-receivable">Voltar para contas</Link>}
+          actions={<Link className="btn btn-outline-secondary" to={returnPath}>Voltar para contas</Link>}
         />
         <AreaTabs area="finance" />
       </>
@@ -174,7 +178,7 @@ export default function FinanceReceivableFormPage({ embedded = false }) {
                 <Form.Control as="textarea" rows={5} value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} />
               </Col>
             </Row>
-            <InlineTabbedFormFooter tabs={tabs} activeKey={activeTab} onSelect={setActiveTab} onCancel={() => navigate("/finance/accounts-receivable")} saveLabel={saving ? "Salvando..." : "Salvar conta a receber"} saveDisabled={saving} />
+            <InlineTabbedFormFooter tabs={tabs} activeKey={activeTab} onSelect={setActiveTab} onCancel={closeForm} saveLabel={saving ? "Salvando..." : "Salvar conta a receber"} saveDisabled={saving} />
           </Card.Body>
         </Card>
       </TabPanel>

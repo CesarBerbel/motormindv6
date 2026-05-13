@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Badge, Button, Card, Col, Form, Row, Table } from "react-bootstrap";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import api, { apiError, apiUrl, results } from "../api/client";
 import AreaTabs from "../components/AreaTabs";
 import EmptyState from "../components/EmptyState";
@@ -8,6 +8,7 @@ import ErrorAlert from "../components/ErrorAlert";
 import PageHeader from "../components/PageHeader";
 import SearchAutocompleteInput from "../components/SearchAutocompleteInput";
 import { estimateStatuses, formatDate, money } from "../workshopOptions";
+import { buildReturnToState } from "../utils/returnTo";
 
 const statusOptions = [["", "Todos"], ...estimateStatuses];
 const statusVariant = { open: "secondary", diagnosis: "info", awaiting_approval: "warning", approved: "success", partially_approved: "success", rejected: "danger", expired: "warning", converted: "primary", cancelled: "dark" };
@@ -35,6 +36,8 @@ function buildEstimateSearchSuggestions(items) {
 
 export default function EstimatesPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const returnState = buildReturnToState(location);
   const [items, setItems] = useState([]);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
@@ -100,14 +103,14 @@ export default function EstimatesPage() {
   }
 
   return <>
-    <PageHeader title="Orçamentos" subtitle="Fluxo comercial do atendimento: montar orçamento, enviar, aprovar, rejeitar e converter em OS." actions={<Button className="btn btn-primary" onClick={() => navigate("/attendance/estimates/new")}>Novo orçamento</Button>} />
+    <PageHeader title="Orçamentos" subtitle="Fluxo comercial do atendimento: montar orçamento, enviar, aprovar, rejeitar e converter em OS." actions={<Button className="btn btn-primary" onClick={() => navigate("/attendance/estimates/new", { state: returnState })}>Novo orçamento</Button>} />
     <AreaTabs area="attendance" />
     <ErrorAlert error={error} onClose={() => setError("")} />
 
     <Card className="border-0 shadow-sm mb-3"><Card.Body><Row className="g-2"><Col md={5}><SearchAutocompleteInput placeholder="Buscar orçamento, cliente, placa ou descrição" value={search} onChange={setSearch} onSearch={onSearch} suggestions={searchSuggestions} /></Col><Col md={3}><Form.Select value={status} onChange={(event) => setStatus(event.target.value)}>{statusOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</Form.Select></Col><Col md={2}><Button variant="outline-primary" className="w-100" onClick={() => load()}>Buscar</Button></Col><Col md={2}><Button variant="outline-secondary" className="w-100" onClick={clearSearch} disabled={!search && !status}>Limpar pesquisa</Button></Col></Row></Card.Body></Card>
 
     <Card className="border-0 shadow-sm"><Card.Body className="p-0">
-      {items.length === 0 ? <EmptyState /> : <Table responsive hover className="mb-0"><thead><tr><th>Número</th><th>Cliente</th><th>Veículo</th><th>Total</th><th>Validade</th><th>Status</th><th></th></tr></thead><tbody>{items.map((item) => <tr key={item.id}><td className="fw-semibold">{item.number}</td><td>{item.customer_name}</td><td>{item.vehicle_display}</td><td>{money(item.total_amount)}</td><td>{formatDate(item.valid_until)}</td><td><Badge bg={statusVariant[item.status] || "secondary"}>{item.status_label}</Badge></td><td className="text-end"><Button size="sm" variant="outline-secondary" className="me-2" onClick={() => navigate(`/attendance/estimates/${item.id}/edit`)}>Editar</Button><Button as="a" size="sm" variant="outline-dark" className="me-2" href={apiUrl(`/attendance/estimates/${item.id}/document/`)} target="_blank" rel="noreferrer">PDF</Button>{["open"].includes(item.status) && <Button size="sm" variant="outline-info" className="me-2" onClick={() => changeStatus(item, "diagnosis")}>Diagnóstico</Button>}{["open", "diagnosis", "awaiting_approval"].includes(item.status) && <Button size="sm" variant="outline-warning" className="me-2" onClick={() => sendCustomerApproval(item)}>Enviar aprovação</Button>}{["approved", "partially_approved"].includes(item.status) && <Button size="sm" className="me-2" onClick={() => convert(item)}>Converter em OS</Button>}{item.converted_work_order && <Link className="btn btn-sm btn-outline-primary" to={`/work-orders/${item.converted_work_order}`}>Abrir OS</Link>}</td></tr>)}</tbody></Table>}
+      {items.length === 0 ? <EmptyState /> : <Table responsive hover className="mb-0"><thead><tr><th>Número</th><th>Cliente</th><th>Veículo</th><th>Total</th><th>Validade</th><th>Status</th><th></th></tr></thead><tbody>{items.map((item) => <tr key={item.id}><td className="fw-semibold">{item.number}</td><td>{item.customer_name}</td><td>{item.vehicle_display}</td><td>{money(item.total_amount)}</td><td>{formatDate(item.valid_until)}</td><td><Badge bg={statusVariant[item.status] || "secondary"}>{item.status_label}</Badge></td><td className="text-end"><Button size="sm" variant="outline-secondary" className="me-2" onClick={() => navigate(`/attendance/estimates/${item.id}/edit`, { state: returnState })}>Editar</Button><Button as="a" size="sm" variant="outline-dark" className="me-2" href={apiUrl(`/attendance/estimates/${item.id}/document/`)} target="_blank" rel="noreferrer">PDF</Button>{["open"].includes(item.status) && <Button size="sm" variant="outline-info" className="me-2" onClick={() => changeStatus(item, "diagnosis")}>Diagnóstico</Button>}{["open", "diagnosis", "awaiting_approval"].includes(item.status) && <Button size="sm" variant="outline-warning" className="me-2" onClick={() => sendCustomerApproval(item)}>Enviar aprovação</Button>}{["approved", "partially_approved"].includes(item.status) && <Button size="sm" className="me-2" onClick={() => convert(item)}>Converter em OS</Button>}{item.converted_work_order && <Link className="btn btn-sm btn-outline-primary" to={`/work-orders/${item.converted_work_order}`} state={returnState}>Abrir OS</Link>}</td></tr>)}</tbody></Table>}
     </Card.Body></Card>
   </>;
 }

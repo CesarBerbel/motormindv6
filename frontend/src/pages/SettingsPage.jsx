@@ -29,6 +29,7 @@ const profileTabs = [
 
 const adminModules = [
   { title: "Categorias", description: "Categorias de peças, serviços, veículos e OS.", to: "/categories", permission: "categories.manage" },
+  { title: "Grupos de contatos", description: "Segmentação administrativa para campanhas, lembretes e automações.", to: "/groups", permission: "contacts.view" },
   { title: "Peças e marcas", description: "Peças, fotos, marcas com autocomplete e estoque mínimo.", to: "/parts", permission: "parts.manage" },
   { title: "Serviços", description: "Catálogo de serviços por categoria pesquisável.", to: "/workshop-services", permission: "services.view" },
   { title: "Pacotes", description: "Combos de serviços para orçamento e OS.", to: "/service-packages", permission: "service_packages.view" },

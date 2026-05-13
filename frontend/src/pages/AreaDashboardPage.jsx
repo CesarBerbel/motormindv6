@@ -21,12 +21,13 @@ const areaActions = {
   administrativo: [
     ["/settings", "Cadastro da oficina", "Dados usados em documentos imprimíveis.", "settings.manage"],
     ["/users", "Usuários", "Cadastro de funcionários e setores.", "users.manage"],
+    ["/categories", "Categorias", "Categorias de peças, serviços, veículos e OS.", "categories.manage"],
+    ["/groups", "Grupos de contatos", "Segmentação para campanhas, lembretes e automações.", "contacts.view"],
     ["/contacts", "Clientes", "Cadastro de clientes e contatos.", "contacts.view"],
-    ["/work-orders", "OS", "Acompanhamento administrativo das ordens.", "work_orders.view"],
+    ["/work-orders", "Orçamento / OS", "Acompanhamento administrativo de orçamentos e ordens.", ["work_orders.view", "estimates.view"]],
   ],
   atendimento: [
-    ["/attendance/estimates", "Orçamentos", "Criar e acompanhar propostas para clientes.", "estimates.view"],
-    ["/work-orders", "Ordens de serviço", "Abrir e acompanhar OS.", "work_orders.view"],
+    ["/work-orders", "Orçamento / OS", "Criar orçamentos, abrir OS e acompanhar o fluxo operacional.", ["work_orders.view", "estimates.view"]],
     ["/vehicles", "Veículos", "Cadastrar e editar veículos por cliente.", "vehicles.view"],
     ["/contacts", "Clientes", "Pesquisar e cadastrar clientes.", "contacts.view"],
   ],

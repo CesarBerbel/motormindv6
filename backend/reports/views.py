@@ -4,7 +4,9 @@ from rest_framework.views import APIView
 from accounts.permissions import HasViewPermission
 
 from .services import (
+    estimates_report,
     executive_summary,
+    export_estimates_csv,
     export_finance_csv,
     export_inventory_csv,
     export_work_orders_csv,
@@ -29,6 +31,11 @@ class WorkOrdersReportView(ReportPermissionMixin, APIView):
         return Response(work_orders_report(request))
 
 
+class EstimatesReportView(ReportPermissionMixin, APIView):
+    def get(self, request):
+        return Response(estimates_report(request))
+
+
 class FinanceReportView(ReportPermissionMixin, APIView):
     def get(self, request):
         return Response(finance_report(request))
@@ -42,6 +49,11 @@ class InventoryReportView(ReportPermissionMixin, APIView):
 class WorkOrdersReportCsvView(ReportPermissionMixin, APIView):
     def get(self, request):
         return export_work_orders_csv(request)
+
+
+class EstimatesReportCsvView(ReportPermissionMixin, APIView):
+    def get(self, request):
+        return export_estimates_csv(request)
 
 
 class FinanceReportCsvView(ReportPermissionMixin, APIView):

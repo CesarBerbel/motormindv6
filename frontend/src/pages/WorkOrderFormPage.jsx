@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { createPortal } from "react-dom";
 import { Alert, Button, Card, Col, Form, Row, Table } from "react-bootstrap";
 import IntegerInput from "../components/IntegerInput";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import api, { apiError, results } from "../api/client";
 import { makeLocalId } from "../utils/localId";
 import AreaTabs from "../components/AreaTabs";
@@ -15,6 +15,7 @@ import MoneyInput from "../components/MoneyInput";
 import PageHeader from "../components/PageHeader";
 import SearchableSelect from "../components/SearchableSelect";
 import { datetimeLocalValue, fromDatetimeLocal, money, priorities, todayDatetimeLocalValue, workOrderTypes } from "../workshopOptions";
+import { resolveReturnTo } from "../utils/returnTo";
 
 function empty() {
   return {
@@ -94,10 +95,13 @@ function photoPreviewUrl(file) {
   return file ? URL.createObjectURL(file) : "";
 }
 
-export default function WorkOrderFormPage({ embedded = false }) {
+export default function WorkOrderFormPage({ embedded = false, returnTo }) {
   const { id } = useParams();
   const editing = Boolean(id);
   const navigate = useNavigate();
+  const location = useLocation();
+  const returnPath = returnTo || resolveReturnTo(location, "/work-orders");
+  const closeForm = () => navigate(returnPath, { replace: true });
   const [form, setForm] = useState(empty());
   const [contacts, setContacts] = useState([]);
   const [vehicles, setVehicles] = useState([]);
@@ -488,7 +492,7 @@ export default function WorkOrderFormPage({ embedded = false }) {
       if (openingPhotos.length) {
         await uploadOpeningPhotos(response.data.id);
       }
-      navigate("/work-orders");
+      closeForm();
     } catch (err) {
       setError(apiError(err));
     }
@@ -498,7 +502,7 @@ export default function WorkOrderFormPage({ embedded = false }) {
     {!embedded ? (
       <>
         <PageHeader title={editing ? "Editar ordem de serviço" : "Nova ordem de serviço"} subtitle="Cadastro de OS separado por abas para facilitar atendimento, revisão e conferência.">
-          <Button as={Link} to={editing ? `/work-orders/${id}` : "/work-orders"} variant="outline-secondary">Voltar</Button>
+          <Button as={Link} to={editing ? `/work-orders/${id}` : returnPath} variant="outline-secondary">Voltar</Button>
         </PageHeader>
         <AreaTabs area="attendance" />
       </>
@@ -795,7 +799,7 @@ export default function WorkOrderFormPage({ embedded = false }) {
             </Row>
           </TabPanel>
 
-          <InlineTabbedFormFooter tabs={tabs} activeKey={activeTab} onSelect={setActiveTab} onCancel={() => navigate("/work-orders")} saveLabel="Salvar" />
+          <InlineTabbedFormFooter tabs={tabs} activeKey={activeTab} onSelect={setActiveTab} onCancel={closeForm} saveLabel="Salvar" />
         </Card.Body>
       </Card>
     </Form>

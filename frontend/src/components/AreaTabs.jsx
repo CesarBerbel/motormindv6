@@ -6,10 +6,8 @@ import { hasPermission } from "../auth/permissions";
 const areaTabs = {
   attendance: [
     { to: "/attendance/dashboard", label: "Dashboard", permission: "dashboard.attendance" },
-    { to: "/attendance/estimates", label: "Orçamentos", permission: "estimates.view" },
+    { to: "/work-orders", label: "Orçamento / OS", permission: ["work_orders.view", "estimates.view"], end: false },
     { to: "/attendance/counter-sales", label: "Venda avulsa", permission: "counter_sales.view" },
-    { to: "/work-orders", label: "OS", permission: "work_orders.view", end: true },
-    { to: "/work-orders/kanban", label: "Kanban", permission: "work_orders.view" },
   ],
   finance: [
     { to: "/finance/dashboard", label: "Dashboard", permission: "finance.view" },
@@ -26,6 +24,7 @@ const areaTabs = {
   reports: [
     { to: "/reports/executive", label: "Executivo", permission: "reports.view" },
     { to: "/reports/work-orders", label: "OS", permission: "reports.view" },
+    { to: "/reports/estimates", label: "Orçamentos", permission: "reports.view" },
     { to: "/reports/finance", label: "Financeiro", permission: "reports.view" },
     { to: "/reports/inventory", label: "Estoque", permission: "reports.view" },
   ],
@@ -34,7 +33,6 @@ const areaTabs = {
     { to: "/stock-movements", label: "Movimentos", permission: "stock.view" },
     { to: "/purchasing/purchase-orders", label: "Compras", permission: "purchases.view" },
     { to: "/purchasing/suppliers", label: "Fornecedores", permission: "suppliers.view" },
-    { to: "/categories", label: "Categorias", permission: "categories.view" },
   ],
 };
 

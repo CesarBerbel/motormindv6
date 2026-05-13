@@ -6,6 +6,7 @@ import api, { apiError } from "../api/client";
 import EmptyState from "../components/EmptyState";
 import ErrorAlert from "../components/ErrorAlert";
 import PageHeader from "../components/PageHeader";
+import AreaTabs from "../components/AreaTabs";
 import { dateInputValue, formatDate, money } from "../workshopOptions";
 
 function firstDay() { return dateInputValue(new Date(new Date().getFullYear(), new Date().getMonth(), 1)); }
@@ -25,6 +26,7 @@ export default function ReportsFinancePage() {
   const s = data?.summary || {};
   return <>
     <PageHeader title="Relatório financeiro" subtitle="Receitas, despesas, saldo previsto, contas vencidas e movimentação por período." actions={<Link className="btn btn-outline-secondary" to="/reports/executive">Dashboard executivo</Link>} />
+    <AreaTabs area="reports" />
     <ErrorAlert error={error} onClose={() => setError("")} />
     <Card className="border-0 shadow-sm mb-4"><Card.Body><Row className="g-3 align-items-end"><Col md={3}><Form.Label>Data inicial</Form.Label><DateInput value={filters.start_date} onChange={(e)=>setFilters({...filters,start_date:e.target.value})}/></Col><Col md={3}><Form.Label>Data final</Form.Label><DateInput value={filters.end_date} onChange={(e)=>setFilters({...filters,end_date:e.target.value})}/></Col><Col md="auto"><Button onClick={load} disabled={loading}>{loading?"Filtrando...":"Filtrar"}</Button></Col><Col md="auto"><Button variant="outline-success" onClick={exportCsv}>Exportar CSV</Button></Col></Row></Card.Body></Card>
     <Row className="g-3 mb-4"><Kpi label="Recebido" value={money(s.received_period)}/><Kpi label="Pago" value={money(s.paid_period)}/><Kpi label="Resultado" value={money(s.net_period)}/><Kpi label="A receber aberto" value={money(s.receivable_open)}/><Kpi label="A pagar aberto" value={money(s.payable_open)}/><Kpi label="Recebíveis vencidos" value={s.overdue_receivables || 0}/><Kpi label="Pagáveis vencidos" value={s.overdue_payables || 0}/><Kpi label="Saldo previsto" value={money(Number(s.receivable_open||0)-Number(s.payable_open||0))}/></Row>

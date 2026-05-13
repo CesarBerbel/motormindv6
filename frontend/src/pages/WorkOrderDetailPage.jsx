@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Card, Col, Form, Modal, Row, Table } from "react-bootstrap";
 import IntegerInput from "../components/IntegerInput";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import api, { apiError, results } from "../api/client";
 import EmptyState from "../components/EmptyState";
 import ErrorAlert from "../components/ErrorAlert";
@@ -15,6 +15,7 @@ import NoticeBox from "../components/NoticeBox";
 import { money, paymentMethods } from "../workshopOptions";
 import { useAuth } from "../auth/AuthContext";
 import { confirmDialog } from "../components/ConfirmDialog";
+import { buildReturnToState, resolveReturnTo } from "../utils/returnTo";
 
 const serviceEmpty = (workOrderId) => ({ work_order: workOrderId, service_id: "", description: "", quantity: "1.00", unit_price: "0.00", discount_amount: "0.00", technician_id: "", status: "pending", notes: "" });
 const partEmpty = (workOrderId) => ({ work_order: workOrderId, part_id: "", linked_service_id: "", description: "", quantity: "1.00", unit_price: "0.00", discount_amount: "0.00", consume_inventory: true, notes: "" });
@@ -59,6 +60,9 @@ function sortCatalogByUsage(items) {
 export default function WorkOrderDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const returnPath = resolveReturnTo(location, "/work-orders");
+  const returnState = buildReturnToState(location);
   const { hasPermission } = useAuth();
   const [order, setOrder] = useState(null);
   const [catalog, setCatalog] = useState([]);
@@ -453,8 +457,8 @@ export default function WorkOrderDetailPage() {
 
   return <>
     <PageHeader title={`${order.number} - ${order.title || "Ordem de serviço"}`} subtitle={`${order.customer_name} · ${order.vehicle_display || "sem veículo"}`}>
-      <Button variant="outline-secondary" onClick={() => navigate("/work-orders")} className="me-2">Voltar</Button>
-      {hasPermission("work_orders.edit") ? <Button as={Link} to={`/work-orders/${id}/edit`} variant="outline-primary" className="me-2">Editar OS</Button> : null}
+      <Button variant="outline-secondary" onClick={() => navigate(returnPath)} className="me-2">Voltar</Button>
+      {hasPermission("work_orders.edit") ? <Button as={Link} to={`/work-orders/${id}/edit`} state={returnState} variant="outline-primary" className="me-2">Editar OS</Button> : null}
       {hasPermission(["technical.dashboard", "dashboard.technical"]) ? <Button as={Link} to="/technical/workbench" variant="outline-info" className="me-2">Bancada técnica</Button> : null}
       {hasPermission("work_orders.edit") ? <Button variant="outline-success" onClick={() => setPhotoModal(true)} className="me-2">Adicionar fotos</Button> : null}
       <Button variant="outline-dark" onClick={() => openDocumentPdf("work_order")} className="me-2">PDF OS</Button>

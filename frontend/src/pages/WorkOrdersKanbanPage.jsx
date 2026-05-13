@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Alert, Badge, Button, Card, Col, Form, Row, Spinner } from "react-bootstrap";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import api, { apiError, apiUrl, results } from "../api/client";
 import ErrorAlert from "../components/ErrorAlert";
 import SystemToast from "../components/SystemToast";
@@ -9,6 +9,7 @@ import AreaTabs from "../components/AreaTabs";
 import StatusBadge from "../components/StatusBadge";
 import { money, priorities } from "../workshopOptions";
 import SearchAutocompleteInput from "../components/SearchAutocompleteInput";
+import { buildReturnToState } from "../utils/returnTo";
 
 const OS_STATUS_LABELS = {
   open: "Aberta",
@@ -59,7 +60,7 @@ function itemKey(item) {
 }
 
 function itemRoute(item) {
-  return kindOf(item) === "estimate" ? `/attendance/estimates/${item.id}/edit` : `/work-orders/${item.id}`;
+  return kindOf(item) === "estimate" ? `/work-orders/estimates/${item.id}/edit` : `/work-orders/${item.id}`;
 }
 
 function itemPdfPath(item) {
@@ -171,6 +172,8 @@ function canEstimateMoveTo(item, columnKey) {
 }
 
 export default function WorkOrdersKanbanPage() {
+  const location = useLocation();
+  const returnState = buildReturnToState(location);
   const [items, setItems] = useState([]);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
@@ -365,10 +368,12 @@ export default function WorkOrdersKanbanPage() {
 
   return <div className="kanban-page">
     <PageHeader title="Kanban operacional" subtitle="Arraste OS e orçamentos entre as etapas. Orçamento não entra em Aguardando peças; aprovação integral/parcial gera uma OS nova.">
-      <Button as={Link} to="/work-orders/new" className="me-2">Nova OS</Button>
-      <Button as={Link} to="/attendance/estimates/new" variant="outline-success" className="me-2">Novo orçamento</Button>
-      <Button as={Link} to="/work-orders/agenda" variant="outline-primary" className="me-2">Agenda</Button>
-      <Button as={Link} to="/work-orders" variant="outline-secondary">Lista OS</Button>
+      <div className="d-flex gap-2 flex-wrap justify-content-end">
+        <Button as={Link} to="/work-orders/new" state={returnState}>Nova OS</Button>
+        <Button as={Link} to="/work-orders/estimates/new" state={returnState} variant="success">Novo orçamento</Button>
+        <Button as={Link} to="/work-orders" variant="outline-secondary">Lista</Button>
+        <Button as={Link} to="/work-orders/agenda" variant="outline-primary">Agenda</Button>
+      </div>
     </PageHeader>
 
     <AreaTabs area="attendance" />
@@ -461,7 +466,7 @@ export default function WorkOrdersKanbanPage() {
                   <div className="min-width-0">
                     <div className="d-flex align-items-center gap-2 flex-wrap">
                       <Badge bg={isEstimate ? "info" : "primary"}>{isEstimate ? "Orçamento" : "OS"}</Badge>
-                      <Link to={itemRoute(item)} className="fw-semibold text-decoration-none">{item.number}</Link>
+                      <Link to={itemRoute(item)} state={returnState} className="fw-semibold text-decoration-none">{item.number}</Link>
                     </div>
                   </div>
                   <StatusBadge value={item.status} label={item.status_label}/>
@@ -480,7 +485,7 @@ export default function WorkOrdersKanbanPage() {
                 {!isEstimate ? <div className="d-flex justify-content-between small"><span>Saldo</span><strong>{money(item.balance_due)}</strong></div> : null}
                 <div className="small text-muted mt-2">{nextStepHint(item)}</div>
                 <div className="d-flex flex-wrap gap-2 justify-content-end mt-3">
-                  <Button as={Link} to={itemRoute(item)} size="sm" variant="outline-secondary">Abrir</Button>
+                  <Button as={Link} to={itemRoute(item)} state={returnState} size="sm" variant="outline-secondary">Abrir</Button>
                   <Button as="a" href={apiUrl(itemPdfPath(item))} target="_blank" rel="noreferrer" size="sm" variant="outline-dark">PDF</Button>
                 </div>
               </Card.Body>

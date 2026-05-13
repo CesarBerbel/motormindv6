@@ -6,6 +6,7 @@ import api, { apiError } from "../api/client";
 import EmptyState from "../components/EmptyState";
 import ErrorAlert from "../components/ErrorAlert";
 import PageHeader from "../components/PageHeader";
+import AreaTabs from "../components/AreaTabs";
 import StatusBadge from "../components/StatusBadge";
 import { dateInputValue, formatDate, money, workOrderStatuses } from "../workshopOptions";
 
@@ -47,6 +48,7 @@ export default function ReportsWorkOrdersPage() {
   const s = data?.summary || {};
   return <>
     <PageHeader title="Relatório de ordens de serviço" subtitle="Faturamento, status, produtividade técnica, serviços e peças usados nas OS." actions={<Link className="btn btn-outline-secondary" to="/reports/executive">Dashboard executivo</Link>} />
+    <AreaTabs area="reports" />
     <ErrorAlert error={error} onClose={() => setError("")} />
     <Card className="border-0 shadow-sm mb-4"><Card.Body><Row className="g-3 align-items-end">
       <Col md={2}><Form.Label>Data inicial</Form.Label><DateInput value={filters.start_date} onChange={(e)=>setFilters({...filters,start_date:e.target.value})}/></Col>

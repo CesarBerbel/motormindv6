@@ -1,14 +1,17 @@
 import React, { useEffect, useState } from "react";
 import { Button, Card, Form, Table } from "react-bootstrap";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import api, { apiError, results } from "../api/client";
 import PageHeader from "../components/PageHeader";
 import ErrorAlert from "../components/ErrorAlert";
 import EmptyState from "../components/EmptyState";
 import StatusBadge from "../components/StatusBadge";
 import { confirmDialog } from "../components/ConfirmDialog";
+import { buildReturnToState } from "../utils/returnTo";
 
 export default function AutomationsPage() {
+  const location = useLocation();
+  const returnState = buildReturnToState(location);
   const [items, setItems] = useState([]);
   const [active, setActive] = useState("");
   const [error, setError] = useState("");
@@ -45,7 +48,7 @@ export default function AutomationsPage() {
   return (
     <>
       <PageHeader title="Automacoes" subtitle="Envios programados e recorrentes.">
-        <Button as={Link} to="/automations/new">Nova automacao</Button>
+        <Button as={Link} to="/automations/new" state={returnState}>Nova automacao</Button>
       </PageHeader>
       <ErrorAlert error={error} onClose={() => setError("")} />
       <Card className="border-0 shadow-sm mb-3"><Card.Body className="d-flex gap-2 align-items-center"><Form.Label className="mb-0">Status</Form.Label><Form.Select style={{ maxWidth: 220 }} value={active} onChange={(e) => setActive(e.target.value)}><option value="">Todos</option><option value="true">Ativas</option><option value="false">Pausadas</option></Form.Select></Card.Body></Card>
@@ -62,7 +65,7 @@ export default function AutomationsPage() {
               <td>{item.next_run_at ? new Date(item.next_run_at).toLocaleString("pt-BR") : "-"}</td>
               <td>{item.is_active ? "Ativa" : "Pausada"}</td>
               <td className="text-end text-nowrap">
-                <Button size="sm" as={Link} to={`/automations/${item.id}`} variant="outline-primary" className="me-2">Editar</Button>
+                <Button size="sm" as={Link} to={`/automations/${item.id}`} state={returnState} variant="outline-primary" className="me-2">Editar</Button>
                 <Button size="sm" variant="outline-success" className="me-2" onClick={() => action(item.id, "run_now")}>Executar</Button>
                 <Button size="sm" variant="outline-secondary" className="me-2" onClick={() => action(item.id, item.is_active ? "pause" : "resume")}>{item.is_active ? "Pausar" : "Ativar"}</Button>
                 <Button size="sm" variant="outline-danger" onClick={() => remove(item)}>Excluir</Button>

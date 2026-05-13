@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Button, Card, Col, Form, Row, Table } from "react-bootstrap";
 import DateInput from "../components/DateInput";
 import IntegerInput from "../components/IntegerInput";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import api, { apiError, results } from "../api/client";
 import { makeLocalId } from "../utils/localId";
 import AreaTabs from "../components/AreaTabs";
@@ -12,6 +12,7 @@ import TabbedFormFooter, { InlineTabbedFormFooter } from "../components/TabbedFo
 import MoneyInput from "../components/MoneyInput";
 import PageHeader from "../components/PageHeader";
 import { dateInputValue, money, paymentMethods } from "../workshopOptions";
+import { resolveReturnTo } from "../utils/returnTo";
 
 const today = () => dateInputValue();
 const emptySale = () => ({ customer_id: "", customer_name: "Cliente balcão", due_date: today(), discount_amount: "", notes: "", items: [] });
@@ -25,8 +26,11 @@ function decimal(value) {
 function lineSubtotal(line) { return decimal(line.quantity) * decimal(line.unit_price); }
 function lineTotal(line) { return Math.max(lineSubtotal(line) - decimal(line.discount_amount), 0); }
 
-export default function CounterSaleFormPage({ embedded = false }) {
+export default function CounterSaleFormPage({ embedded = false, returnTo }) {
   const navigate = useNavigate();
+  const location = useLocation();
+  const returnPath = returnTo || resolveReturnTo(location, "/attendance/counter-sales");
+  const closeForm = () => navigate(returnPath, { replace: true });
   const [contacts, setContacts] = useState([]);
   const [parts, setParts] = useState([]);
   const [form, setForm] = useState(emptySale());
@@ -107,7 +111,7 @@ export default function CounterSaleFormPage({ embedded = false }) {
           payment_notes: payment.payment_notes,
         });
       }
-      navigate("/attendance/counter-sales");
+      closeForm();
     } catch (err) {
       setError(apiError(err));
     } finally {
@@ -121,7 +125,7 @@ export default function CounterSaleFormPage({ embedded = false }) {
         <PageHeader
           title="Nova venda avulsa"
           subtitle="Venda direta de balcão organizada por abas: cliente, peças e pagamento."
-          actions={<Link className="btn btn-outline-secondary" to="/attendance/counter-sales">Voltar para vendas</Link>}
+          actions={<Link className="btn btn-outline-secondary" to={returnPath}>Voltar para vendas</Link>}
         />
         <AreaTabs area="attendance" />
       </>
@@ -221,7 +225,7 @@ export default function CounterSaleFormPage({ embedded = false }) {
                 <Form.Control value={payment.payment_reference} disabled={!payment.receive_now || !finalizeAfterSave} onChange={(event) => setPayment({ ...payment, payment_reference: event.target.value })} />
               </Col>
             </Row>
-            <InlineTabbedFormFooter tabs={tabs} activeKey={activeTab} onSelect={setActiveTab} onCancel={() => navigate("/attendance/counter-sales")} saveLabel={saving ? "Salvando..." : "Salvar venda"} saveDisabled={saving || form.items.length === 0} />
+            <InlineTabbedFormFooter tabs={tabs} activeKey={activeTab} onSelect={setActiveTab} onCancel={closeForm} saveLabel={saving ? "Salvando..." : "Salvar venda"} saveDisabled={saving || form.items.length === 0} />
           </Card.Body>
         </Card>
       </TabPanel>

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Badge, Button, ButtonGroup, Card, Col, Form, Row, Spinner } from "react-bootstrap";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import api, { apiError, results } from "../api/client";
 import AreaTabs from "../components/AreaTabs";
 import DateInput from "../components/DateInput";
@@ -10,6 +10,7 @@ import PageHeader from "../components/PageHeader";
 import SearchAutocompleteInput from "../components/SearchAutocompleteInput";
 import StatusBadge from "../components/StatusBadge";
 import { money, priorities } from "../workshopOptions";
+import { buildReturnToState } from "../utils/returnTo";
 
 const OS_FINAL_STATUSES = new Set(["completed"]);
 const ESTIMATE_FINAL_STATUSES = new Set(["approved", "partially_approved", "rejected", "expired", "converted", "cancelled"]);
@@ -51,7 +52,7 @@ function itemKey(item) {
 }
 
 function itemRoute(item) {
-  return kindOf(item) === "estimate" ? `/attendance/estimates/${item.id}/edit` : `/work-orders/${item.id}`;
+  return kindOf(item) === "estimate" ? `/work-orders/estimates/${item.id}/edit` : `/work-orders/${item.id}`;
 }
 
 function visualStatus(item) {
@@ -287,7 +288,7 @@ function getPeriodStep(viewMode) {
   return "day";
 }
 
-function itemCard(item) {
+function itemCard(item, linkState) {
   const overdue = isOverdue(item);
   const isEstimate = kindOf(item) === "estimate";
   return <Card key={itemKey(item)} className={`agenda-order-card operational-card ${isEstimate ? "technical-card-estimate" : "technical-card-os"} border-0 shadow-sm ${overdue ? "agenda-order-overdue" : ""}`}>
@@ -296,7 +297,7 @@ function itemCard(item) {
         <div className="min-width-0">
           <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
             <Badge bg={isEstimate ? "info" : "primary"}>{isEstimate ? "Orçamento" : "OS"}</Badge>
-            <Link to={itemRoute(item)} className="fw-semibold text-decoration-none">{item.number}</Link>
+            <Link to={itemRoute(item)} state={linkState} className="fw-semibold text-decoration-none">{item.number}</Link>
             {overdue ? <Badge bg="danger">Atrasado</Badge> : null}
             <StatusBadge value={item.status} label={item.status_label} />
             {!isEstimate ? <StatusBadge value={item.priority} label={item.priority_label} /> : null}
@@ -318,6 +319,8 @@ function itemCard(item) {
 }
 
 export default function WorkOrdersAgendaPage() {
+  const location = useLocation();
+  const returnState = buildReturnToState(location);
   const [items, setItems] = useState([]);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
@@ -481,7 +484,7 @@ export default function WorkOrdersAgendaPage() {
         <Badge bg={overdueCount ? "danger" : "secondary"}>{dayItems.length}</Badge>
       </div>
 
-      {dayItems.length ? <div className="agenda-order-list">{dayItems.map(itemCard)}</div> : <Card className="border-0 shadow-sm agenda-empty-day"><Card.Body className="text-muted small">Nenhuma OS ou orçamento para este dia.</Card.Body></Card>}
+      {dayItems.length ? <div className="agenda-order-list">{dayItems.map((item) => itemCard(item, returnState))}</div> : <Card className="border-0 shadow-sm agenda-empty-day"><Card.Body className="text-muted small">Nenhuma OS ou orçamento para este dia.</Card.Body></Card>}
     </section>;
   }
 
@@ -524,10 +527,12 @@ export default function WorkOrdersAgendaPage() {
 
   return <>
     <PageHeader title="Agenda operacional" subtitle="Visualize OS por previsão de entrega e orçamentos por validade, com cores diferentes para cada tipo.">
-      <Button as={Link} to="/work-orders" variant="outline-secondary" className="me-2">Lista OS</Button>
-      <Button as={Link} to="/attendance/estimates" variant="outline-success" className="me-2">Orçamentos</Button>
-      <Button as={Link} to="/work-orders/kanban" variant="outline-primary" className="me-2">Kanban</Button>
-      <Button as={Link} to="/work-orders/new">Nova OS</Button>
+      <div className="d-flex gap-2 flex-wrap justify-content-end">
+        <Button as={Link} to="/work-orders/new" state={returnState}>Nova OS</Button>
+        <Button as={Link} to="/work-orders/estimates/new" state={returnState} variant="success">Novo orçamento</Button>
+        <Button as={Link} to="/work-orders" variant="outline-secondary">Lista</Button>
+        <Button as={Link} to="/work-orders/kanban" variant="outline-primary">Kanban</Button>
+      </div>
     </PageHeader>
     <AreaTabs area="attendance" />
     <ErrorAlert error={error} onClose={() => setError("")} />

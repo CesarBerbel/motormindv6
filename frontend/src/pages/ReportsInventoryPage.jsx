@@ -6,6 +6,7 @@ import api, { apiError } from "../api/client";
 import EmptyState from "../components/EmptyState";
 import ErrorAlert from "../components/ErrorAlert";
 import PageHeader from "../components/PageHeader";
+import AreaTabs from "../components/AreaTabs";
 import { dateInputValue, money } from "../workshopOptions";
 
 function firstDay() { return dateInputValue(new Date(new Date().getFullYear(), new Date().getMonth(), 1)); }
@@ -23,6 +24,7 @@ export default function ReportsInventoryPage() {
   const s = data?.summary || {};
   return <>
     <PageHeader title="Relatório de estoque" subtitle="Estoque baixo, valor estimado, consumo por OS e lista exportável de peças." actions={<Link className="btn btn-outline-secondary" to="/reports/executive">Dashboard executivo</Link>} />
+    <AreaTabs area="reports" />
     <ErrorAlert error={error} onClose={() => setError("")} />
     <Card className="border-0 shadow-sm mb-4"><Card.Body><Row className="g-3 align-items-end"><Col md={2}><Form.Label>Data inicial</Form.Label><DateInput value={filters.start_date} onChange={(e)=>setFilters({...filters,start_date:e.target.value})}/></Col><Col md={2}><Form.Label>Data final</Form.Label><DateInput value={filters.end_date} onChange={(e)=>setFilters({...filters,end_date:e.target.value})}/></Col><Col md={3}><Form.Label>Busca</Form.Label><Form.Control value={filters.search} placeholder="SKU, peça ou marca" onChange={(e)=>setFilters({...filters,search:e.target.value})}/></Col><Col md={3}><Form.Label>Estoque</Form.Label><Form.Select value={filters.low_stock} onChange={(e)=>setFilters({...filters,low_stock:e.target.value})}><option value="">Todos</option><option value="1">Somente baixo estoque</option></Form.Select></Col><Col md="auto"><Button onClick={load} disabled={loading}>{loading?"Filtrando...":"Filtrar"}</Button></Col><Col md="auto"><Button variant="outline-success" onClick={exportCsv}>Exportar CSV</Button></Col></Row></Card.Body></Card>
     <Row className="g-3 mb-4"><Kpi label="Peças ativas" value={s.active_parts || 0}/><Kpi label="Baixo estoque" value={s.low_stock_parts || 0}/><Kpi label="Sem estoque" value={s.out_of_stock_parts || 0}/><Kpi label="Valor em estoque" value={money(s.stock_value)}/><Kpi label="Entradas no período" value={s.purchase_movements || 0}/><Kpi label="Consumos no período" value={s.consumption_movements || 0}/><Kpi label="Qtd. consumida" value={s.consumed_quantity || 0}/></Row>

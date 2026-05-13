@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Alert, Button, Card, Col, Form, Modal, Row, Spinner, Table } from "react-bootstrap";
 import DateInput from "../components/DateInput";
 import IntegerInput from "../components/IntegerInput";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import api, { apiError, results } from "../api/client";
 import { makeLocalId } from "../utils/localId";
 import AreaTabs from "../components/AreaTabs";
@@ -16,6 +16,7 @@ import PhoneInputBR from "../components/PhoneInputBR";
 import SearchableSelect from "../components/SearchableSelect";
 import { dateInputValue, fuelTankLevelOptions, maskCpfCnpj, money, normalizePartUnit, partUnitOptions, vehicleSteeringTypes, vehicleTransmissionTypes } from "../workshopOptions";
 import { normalizeBrazilPhoneToE164 } from "../utils/phone";
+import { resolveReturnTo } from "../utils/returnTo";
 
 const emptyEstimate = () => ({ customer_id: "", vehicle_id: "", title: "", complaint: "", diagnosis: "", internal_notes: "", customer_notes: "", valid_until: dateInputValue(), tank_level_percent: "0", discount_amount: "", services: [], parts: [] });
 const emptyService = () => ({ local_id: makeLocalId(), service_id: "", description: "", quantity: "1.00", unit_price: "", discount_amount: "0.00", notes: "" });
@@ -1579,10 +1580,13 @@ function QuickPackageModal({ show, onHide, onCreated, services }) {
   );
 }
 
-export default function EstimateFormPage({ embedded = false }) {
+export default function EstimateFormPage({ embedded = false, returnTo }) {
   const { id } = useParams();
   const editing = Boolean(id);
   const navigate = useNavigate();
+  const location = useLocation();
+  const returnPath = returnTo || resolveReturnTo(location, "/attendance/estimates");
+  const closeForm = () => navigate(returnPath, { replace: true });
   const [contacts, setContacts] = useState([]);
   const [vehicles, setVehicles] = useState([]);
   const [services, setServices] = useState([]);
@@ -1882,7 +1886,7 @@ export default function EstimateFormPage({ embedded = false }) {
       };
       if (editing) await api.put(`/attendance/estimates/${id}/`, payload);
       else await api.post("/attendance/estimates/", payload);
-      navigate("/attendance/estimates");
+      closeForm();
     } catch (err) {
       setError(apiError(err));
     } finally {
@@ -1891,7 +1895,7 @@ export default function EstimateFormPage({ embedded = false }) {
   }
 
   return <>
-    {!embedded ? (<><PageHeader title={editing ? "Editar orçamento" : "Novo orçamento"} subtitle="Monte o orçamento por abas: cliente, serviços, peças e resumo financeiro." actions={<Link className="btn btn-outline-secondary" to="/attendance/estimates">Voltar para orçamentos</Link>} /><AreaTabs area="attendance" /></>) : null}
+    {!embedded ? (<><PageHeader title={editing ? "Editar orçamento" : "Novo orçamento"} subtitle="Monte o orçamento por abas: cliente, serviços, peças e resumo financeiro." actions={<Link className="btn btn-outline-secondary" to={returnPath}>Voltar para orçamentos</Link>} /><AreaTabs area="attendance" /></>) : null}
     <ErrorAlert error={error} onClose={() => setError("")} />
 
     <Form onSubmit={save} noValidate>
@@ -2073,7 +2077,7 @@ export default function EstimateFormPage({ embedded = false }) {
           </Col>
         </Row></Card.Body></Card>
       </TabPanel>
-      <TabbedFormFooter tabs={tabs} activeKey={activeTab} onSelect={setActiveTab} onCancel={() => navigate("/attendance/estimates")} saveLabel={saving ? "Salvando..." : editing ? "Salvar alterações" : "Salvar orçamento"} saveDisabled={saving} />
+      <TabbedFormFooter tabs={tabs} activeKey={activeTab} onSelect={setActiveTab} onCancel={closeForm} saveLabel={saving ? "Salvando..." : editing ? "Salvar alterações" : "Salvar orçamento"} saveDisabled={saving} />
     </Form>
     <QuickCustomerVehicleModal show={quickCustomerVehicleModal} onHide={() => setQuickCustomerVehicleModal(false)} onCreated={handleQuickCustomerVehicleCreated} />
     <QuickServiceModal show={quickServiceModal} onHide={() => setQuickServiceModal(false)} onCreated={handleQuickServiceCreated} categories={serviceCategories} />

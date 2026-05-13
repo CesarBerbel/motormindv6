@@ -6,6 +6,7 @@ import api, { apiError } from "../api/client";
 import EmptyState from "../components/EmptyState";
 import ErrorAlert from "../components/ErrorAlert";
 import PageHeader from "../components/PageHeader";
+import AreaTabs from "../components/AreaTabs";
 import StatusBadge from "../components/StatusBadge";
 import { dateInputValue, formatDate, money } from "../workshopOptions";
 
@@ -96,8 +97,9 @@ export default function ReportsExecutivePage() {
       <PageHeader
         title="Dashboard executivo"
         subtitle="Visão gerencial consolidada de OS, financeiro, estoque e aprovações."
-        actions={<div className="d-flex gap-2 flex-wrap"><Link className="btn btn-outline-primary" to="/reports/work-orders">Relatório de OS</Link><Link className="btn btn-outline-primary" to="/reports/finance">Financeiro</Link><Link className="btn btn-outline-primary" to="/reports/inventory">Estoque</Link></div>}
+        actions={<div className="d-flex gap-2 flex-wrap"><Link className="btn btn-outline-primary" to="/reports/work-orders">Relatório de OS</Link><Link className="btn btn-outline-primary" to="/reports/estimates">Orçamentos</Link><Link className="btn btn-outline-primary" to="/reports/finance">Financeiro</Link><Link className="btn btn-outline-primary" to="/reports/inventory">Estoque</Link></div>}
       />
+      <AreaTabs area="reports" />
       <ErrorAlert error={error} onClose={() => setError("")} />
       <Card className="border-0 shadow-sm mb-4">
         <Card.Body>

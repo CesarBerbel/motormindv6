@@ -5,6 +5,7 @@ from django.test import override_settings
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
+from attendance.models import Estimate
 from messaging.models import Contact
 from workshop.models import Part, PartStockMovement, Vehicle, WorkOrder, WorkOrderPart, WorkOrderPayment, WorkOrderService, WorkshopService
 from finance.models import AccountPayable, AccountReceivable
@@ -28,6 +29,7 @@ class ReportsApiTests(APITestCase):
         PartStockMovement.objects.create(part=self.part, movement_type=PartStockMovement.MovementType.CONSUMPTION, quantity=Decimal("-2.00"), unit_cost=Decimal("35.00"), work_order=self.order, actor=self.user)
         AccountReceivable.objects.create(customer=self.customer, description="Receber relatório", amount=Decimal("230.00"), due_date=timezone.localdate())
         AccountPayable.objects.create(description="Pagar relatório", category="Teste", amount=Decimal("80.00"), due_date=timezone.localdate(), created_by=self.user)
+        self.estimate = Estimate.objects.create(customer=self.customer, vehicle=self.vehicle, title="Orçamento relatório", status=Estimate.Status.AWAITING_APPROVAL, valid_until=timezone.localdate(), total_amount=Decimal("180.00"), created_by=self.user)
 
     def test_executive_summary_report(self):
         response = self.client.get("/api/reports/executive-summary/")
@@ -42,6 +44,16 @@ class ReportsApiTests(APITestCase):
         self.assertIn("summary", response.data)
         self.assertIn("rows", response.data)
         csv_response = self.client.get("/api/reports/work-orders/export.csv")
+        self.assertEqual(csv_response.status_code, 200)
+        self.assertIn("text/csv", csv_response["Content-Type"])
+
+    def test_estimates_report_and_csv(self):
+        response = self.client.get("/api/reports/estimates/")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("summary", response.data)
+        self.assertIn("rows", response.data)
+        self.assertGreaterEqual(response.data["summary"]["count"], 1)
+        csv_response = self.client.get("/api/reports/estimates/export.csv")
         self.assertEqual(csv_response.status_code, 200)
         self.assertIn("text/csv", csv_response["Content-Type"])
 
