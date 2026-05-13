@@ -103,6 +103,8 @@ export default function WorkshopServicesPage() {
   const [defaultParts, setDefaultParts] = useState([]);
   const [newChecklistItem, setNewChecklistItem] = useState({ description: "", is_required: true, requires_photo: false, requires_note: false, sort_order: 0, is_active: true });
   const [newDefaultPart, setNewDefaultPart] = useState({ part_id: "", quantity: "1.00", unit_price: "", discount_amount: "0.00", consume_inventory: true, notes: "", position: 0, is_active: true });
+  const [showDefaultPartModal, setShowDefaultPartModal] = useState(false);
+  const [showChecklistModal, setShowChecklistModal] = useState(false);
 
   const categoryOptions = [
     { value: "", label: "Sem categoria" },
@@ -196,6 +198,34 @@ export default function WorkshopServicesPage() {
   function update(patch) {
     setForm((current) => ({ ...current, ...patch }));
   }
+  function emptyDefaultPart(position = defaultParts.length + 1) {
+    return { part_id: "", quantity: "1.00", unit_price: "", discount_amount: "0.00", consume_inventory: true, notes: "", position, is_active: true };
+  }
+
+  function emptyChecklistItem(sortOrder = checklistTemplates.length + 1) {
+    return { description: "", is_required: true, requires_photo: false, requires_note: false, sort_order: sortOrder, is_active: true };
+  }
+
+  function openDefaultPartModal() {
+    setNewDefaultPart(emptyDefaultPart(defaultParts.length + 1));
+    setShowDefaultPartModal(true);
+  }
+
+  function closeDefaultPartModal() {
+    setShowDefaultPartModal(false);
+    setNewDefaultPart(emptyDefaultPart(defaultParts.length + 1));
+  }
+
+  function openChecklistModal() {
+    setNewChecklistItem(emptyChecklistItem(checklistTemplates.length + 1));
+    setShowChecklistModal(true);
+  }
+
+  function closeChecklistModal() {
+    setShowChecklistModal(false);
+    setNewChecklistItem(emptyChecklistItem(checklistTemplates.length + 1));
+  }
+
 
   async function open(item = null) {
     setEditing(item);
@@ -339,7 +369,7 @@ export default function WorkshopServicesPage() {
         part_stock_quantity: selected?.stock_quantity ?? 0,
         part_unit: selected?.unit || "un",
       }]);
-      setNewDefaultPart({ part_id: "", quantity: "1.00", unit_price: "", discount_amount: "0.00", consume_inventory: true, notes: "", position: defaultParts.length + 1, is_active: true });
+      closeDefaultPartModal();
       setError("");
       return;
     }
@@ -349,7 +379,7 @@ export default function WorkshopServicesPage() {
         ...payload,
         service: editing.id,
       });
-      setNewDefaultPart({ part_id: "", quantity: "1.00", unit_price: "", discount_amount: "0.00", consume_inventory: true, notes: "", position: defaultParts.length + 1, is_active: true });
+      closeDefaultPartModal();
       await loadDefaultParts(editing.id);
     } catch (err) {
       setError(apiError(err));
@@ -408,14 +438,14 @@ export default function WorkshopServicesPage() {
         sort_order: newChecklistItem.sort_order || current.length + 1,
         is_active: newChecklistItem.is_active !== false,
       }]);
-      setNewChecklistItem({ description: "", is_required: true, requires_photo: false, requires_note: false, sort_order: checklistTemplates.length + 1, is_active: true });
+      closeChecklistModal();
       setError("");
       return;
     }
 
     try {
       await api.post("/workshop/service-checklist-templates/", { ...newChecklistItem, service: editing.id });
-      setNewChecklistItem({ description: "", is_required: true, requires_photo: false, requires_note: false, sort_order: checklistTemplates.length + 1, is_active: true });
+      closeChecklistModal();
       await loadChecklistTemplates(editing.id);
     } catch (err) {
       setError(apiError(err));
@@ -632,49 +662,35 @@ export default function WorkshopServicesPage() {
                 <p className="text-muted small mb-3">Quando este serviço for adicionado a um orçamento ou OS, as peças ativas abaixo entram automaticamente como sugestão vinculada ao serviço. O atendente ainda pode ajustar quantidade, preço e desconto antes de salvar.</p>
                 {!editing ? <div className="alert alert-info mb-3">As peças padrão adicionadas aqui serão gravadas junto com o serviço ao salvar.</div> : null}
                 <>
-                  {defaultParts.length ? <div className="line-builder-stack mb-3">
-                    {defaultParts.map((item, index) => (
-                      <div className="line-builder-card" key={item.id}>
-                        <div className="line-builder-card-header">
-                          <div className="d-flex gap-2 align-items-start">
-                            <span className="line-builder-index">{index + 1}</span>
-                            <div>
-                              <div className="line-builder-title">{item.part_sku ? `${item.part_sku} - ` : ""}{item.part_name}</div>
-                              <div className="line-builder-meta">Estoque: {item.part_stock_quantity ?? 0} {item.part_unit || "un"} · Preço cadastrado: {money(item.part_sale_price || 0)}</div>
-                            </div>
-                          </div>
-                          <div className="line-builder-total"><span>Total</span><strong>{money(defaultPartTotal(item))}</strong></div>
-                        </div>
-                        <Row className="g-3 align-items-end">
-                          <Col md={2}><Form.Label>Ordem</Form.Label><IntegerInput value={item.position || 0} onChange={(event) => setDefaultParts((current) => current.map((row) => row.id === item.id ? { ...row, position: event.target.value } : row))} /></Col>
-                          <Col md={2}><Form.Label>Qtd.</Form.Label><IntegerInput min="0.01" step="0.01" value={item.quantity || "1.00"} onChange={(event) => setDefaultParts((current) => current.map((row) => row.id === item.id ? { ...row, quantity: event.target.value } : row))} /></Col>
-                          <Col md={3}><Form.Label>Unitário</Form.Label><MoneyInput value={item.unit_price || "0.00"} onChange={(value) => setDefaultParts((current) => current.map((row) => row.id === item.id ? { ...row, unit_price: value } : row))} /></Col>
-                          <Col md={3}><Form.Label>Desconto</Form.Label><MoneyInput value={item.discount_amount || "0.00"} onChange={(value) => setDefaultParts((current) => current.map((row) => row.id === item.id ? { ...row, discount_amount: value } : row))} /></Col>
-                          <Col md={2}><Form.Check label="Ativa" checked={!!item.is_active} onChange={(event) => setDefaultParts((current) => current.map((row) => row.id === item.id ? { ...row, is_active: event.target.checked } : row))} /></Col>
-                          <Col md={8}><Form.Label>Observação padrão</Form.Label><Form.Control value={item.notes || ""} onChange={(event) => setDefaultParts((current) => current.map((row) => row.id === item.id ? { ...row, notes: event.target.value } : row))} placeholder="Ex.: trocar junto com a mão de obra" /></Col>
-                          <Col md={4} className="line-builder-actions"><Form.Check label="Consumir estoque na OS" checked={!!item.consume_inventory} onChange={(event) => setDefaultParts((current) => current.map((row) => row.id === item.id ? { ...row, consume_inventory: event.target.checked } : row))} /><Button size="sm" variant="outline-primary" type="button" onClick={() => updateDefaultPart(item)}>Salvar</Button><Button size="sm" variant="outline-danger" type="button" onClick={() => removeDefaultPart(item)}>Remover</Button></Col>
-                        </Row>
-                      </div>
-                    ))}
-                  </div> : <Alert variant="light" className="border">Nenhuma peça padrão vinculada. Use o bloco abaixo para criar a primeira sugestão automática.</Alert>}
-                  <div className="border rounded p-3 bg-light">
-                    <div className="fw-semibold mb-2">Nova peça padrão</div>
-                    <Row className="g-2 align-items-end">
-                      <Col md={5}>
-                        <SearchableSelect label="Peça" value={newDefaultPart.part_id || ""} options={partOptions} onChange={selectDefaultPart} placeholder="Pesquisar peça" emptyMessage="Nenhuma peça encontrada." />
-                      </Col>
-                      <Col md={2}><Form.Label>Qtd.</Form.Label><IntegerInput min="0.01" step="0.01" value={newDefaultPart.quantity} onChange={(event) => setNewDefaultPart({ ...newDefaultPart, quantity: event.target.value })} /></Col>
-                      <Col md={2}><Form.Label>Unitário</Form.Label><MoneyInput value={newDefaultPart.unit_price} onChange={(value) => setNewDefaultPart({ ...newDefaultPart, unit_price: value })} /></Col>
-                      <Col md={2}><Form.Label>Desconto</Form.Label><MoneyInput value={newDefaultPart.discount_amount} onChange={(value) => setNewDefaultPart({ ...newDefaultPart, discount_amount: value })} /></Col>
-                      <Col md={1}><Form.Label>Ordem</Form.Label><IntegerInput value={newDefaultPart.position} onChange={(event) => setNewDefaultPart({ ...newDefaultPart, position: event.target.value })} /></Col>
-                      <Col md={8}><Form.Label>Observação padrão</Form.Label><Form.Control value={newDefaultPart.notes} onChange={(event) => setNewDefaultPart({ ...newDefaultPart, notes: event.target.value })} /></Col>
-                      <Col md={4} className="d-flex flex-wrap gap-3 align-items-center">
-                        <Form.Check label="Consumir estoque na OS" checked={!!newDefaultPart.consume_inventory} onChange={(event) => setNewDefaultPart({ ...newDefaultPart, consume_inventory: event.target.checked })} />
-                        <Form.Check label="Ativa" checked={!!newDefaultPart.is_active} onChange={(event) => setNewDefaultPart({ ...newDefaultPart, is_active: event.target.checked })} />
-                      </Col>
-                    </Row>
-                    <Button type="button" variant="outline-success" className="mt-3" onClick={addDefaultPart}>Adicionar peça padrão</Button>
+                  <div className="d-flex justify-content-between align-items-center gap-2 mb-3">
+                    <div className="text-muted small mb-0">As peças escolhidas ficam consolidadas abaixo. Para alterar dados de uma peça padrão, remova e insira novamente com os valores corretos.</div>
+                    <Button type="button" variant="outline-success" onClick={openDefaultPartModal}>Inserir peça</Button>
                   </div>
+                  {defaultParts.length ? (
+                    <Table responsive size="sm" className="align-middle mb-0">
+                      <thead>
+                        <tr><th>Ordem</th><th>Peça</th><th>Qtd.</th><th>Unitário</th><th>Desconto</th><th>Total</th><th>Estoque</th><th>Status</th><th></th></tr>
+                      </thead>
+                      <tbody>
+                        {defaultParts.map((item) => (
+                          <tr key={item.id}>
+                            <td>{item.position || 0}</td>
+                            <td>
+                              <div className="fw-semibold">{item.part_sku ? `${item.part_sku} - ` : ""}{item.part_name || "Peça selecionada"}</div>
+                              <div className="text-muted small">{item.notes || "Sem observação"} · {item.consume_inventory ? "Consome estoque" : "Não consome estoque"}</div>
+                            </td>
+                            <td>{item.quantity || "1.00"}</td>
+                            <td>{money(item.unit_price || 0)}</td>
+                            <td>{money(item.discount_amount || 0)}</td>
+                            <td className="fw-semibold">{money(defaultPartTotal(item))}</td>
+                            <td>{item.part_stock_quantity ?? 0} {item.part_unit || "un"}</td>
+                            <td>{item.is_active !== false ? "Ativa" : "Inativa"}</td>
+                            <td className="text-end"><Button size="sm" variant="outline-danger" type="button" onClick={() => removeDefaultPart(item)}>Remover</Button></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </Table>
+                  ) : <Alert variant="light" className="border">Nenhuma peça padrão vinculada. Clique em Inserir peça para criar a primeira sugestão automática.</Alert>}
                 </>
               </Card.Body>
             </Card>
@@ -686,35 +702,28 @@ export default function WorkshopServicesPage() {
                 <div className="form-section-title">Checklist técnico padrão</div>
                 {!editing ? <div className="alert alert-info mb-3">Os itens de checklist adicionados aqui serão gravados junto com o serviço ao salvar.</div> : null}
                 <>
-                  <Table responsive size="sm" className="align-middle">
-                    <thead><tr><th>Ordem</th><th>Descrição</th><th>Obrig.</th><th>Foto</th><th>Obs.</th><th>Ativo</th><th></th></tr></thead>
-                    <tbody>
-                      {checklistTemplates.map((item) => (
-                        <tr key={item.id}>
-                          <td style={{ width: 90 }}><IntegerInput value={item.sort_order || 0} onChange={(event) => setChecklistTemplates((current) => current.map((row) => row.id === item.id ? { ...row, sort_order: event.target.value } : row))} /></td>
-                          <td><Form.Control value={item.description || ""} onChange={(event) => setChecklistTemplates((current) => current.map((row) => row.id === item.id ? { ...row, description: event.target.value } : row))} /></td>
-                          <td><Form.Check checked={!!item.is_required} onChange={(event) => setChecklistTemplates((current) => current.map((row) => row.id === item.id ? { ...row, is_required: event.target.checked } : row))} /></td>
-                          <td><Form.Check checked={!!item.requires_photo} onChange={(event) => setChecklistTemplates((current) => current.map((row) => row.id === item.id ? { ...row, requires_photo: event.target.checked } : row))} /></td>
-                          <td><Form.Check checked={!!item.requires_note} onChange={(event) => setChecklistTemplates((current) => current.map((row) => row.id === item.id ? { ...row, requires_note: event.target.checked } : row))} /></td>
-                          <td><Form.Check checked={!!item.is_active} onChange={(event) => setChecklistTemplates((current) => current.map((row) => row.id === item.id ? { ...row, is_active: event.target.checked } : row))} /></td>
-                          <td className="text-end"><Button size="sm" variant="outline-primary" onClick={() => updateChecklistTemplate(item)} className="me-2">Salvar</Button><Button size="sm" variant="outline-danger" onClick={() => removeChecklistTemplate(item)}>Excluir</Button></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </Table>
-                  <div className="border rounded p-3 bg-light">
-                    <div className="fw-semibold mb-2">Novo item</div>
-                    <Row className="g-2 align-items-end">
-                      <Col md={6}><Form.Label>Descrição</Form.Label><Form.Control value={newChecklistItem.description} onChange={(event) => setNewChecklistItem({ ...newChecklistItem, description: event.target.value })} /></Col>
-                      <Col md={2}><Form.Label>Ordem</Form.Label><IntegerInput value={newChecklistItem.sort_order} onChange={(event) => setNewChecklistItem({ ...newChecklistItem, sort_order: event.target.value })} /></Col>
-                      <Col md={4} className="d-flex gap-3 flex-wrap">
-                        <Form.Check label="Obrigatório" checked={!!newChecklistItem.is_required} onChange={(event) => setNewChecklistItem({ ...newChecklistItem, is_required: event.target.checked })} />
-                        <Form.Check label="Foto" checked={!!newChecklistItem.requires_photo} onChange={(event) => setNewChecklistItem({ ...newChecklistItem, requires_photo: event.target.checked })} />
-                        <Form.Check label="Obs." checked={!!newChecklistItem.requires_note} onChange={(event) => setNewChecklistItem({ ...newChecklistItem, requires_note: event.target.checked })} />
-                      </Col>
-                    </Row>
-                    <Button type="button" variant="outline-success" className="mt-3" onClick={addChecklistTemplate}>Adicionar item</Button>
+                  <div className="d-flex justify-content-between align-items-center gap-2 mb-3">
+                    <div className="text-muted small mb-0">Os itens escolhidos ficam em uma tabela de consulta. Para corrigir um item, remova e insira novamente.</div>
+                    <Button type="button" variant="outline-success" onClick={openChecklistModal}>Inserir item</Button>
                   </div>
+                  {checklistTemplates.length ? (
+                    <Table responsive size="sm" className="align-middle mb-0">
+                      <thead><tr><th>Ordem</th><th>Descrição</th><th>Obrigatório</th><th>Foto</th><th>Obs.</th><th>Status</th><th></th></tr></thead>
+                      <tbody>
+                        {checklistTemplates.map((item) => (
+                          <tr key={item.id}>
+                            <td>{item.sort_order || 0}</td>
+                            <td className="fw-semibold">{item.description || "-"}</td>
+                            <td>{item.is_required ? "Sim" : "Não"}</td>
+                            <td>{item.requires_photo ? "Sim" : "Não"}</td>
+                            <td>{item.requires_note ? "Sim" : "Não"}</td>
+                            <td>{item.is_active !== false ? "Ativo" : "Inativo"}</td>
+                            <td className="text-end"><Button size="sm" variant="outline-danger" type="button" onClick={() => removeChecklistTemplate(item)}>Remover</Button></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </Table>
+                  ) : <Alert variant="light" className="border">Nenhum item de checklist vinculado. Clique em Inserir item para criar o primeiro checklist padrão.</Alert>}
                 </>
               </Card.Body>
             </Card>
@@ -736,6 +745,54 @@ export default function WorkshopServicesPage() {
         </Modal.Body>
         <TabbedFormFooter tabs={tabs} activeKey={activeTab} onSelect={setActiveTab} onCancel={() => setShow(false)} saveLabel="Salvar" />
       </Form>
+    </Modal>
+
+    <Modal show={showDefaultPartModal} onHide={closeDefaultPartModal} centered size="lg" backdrop="static">
+      <Modal.Header closeButton>
+        <Modal.Title>Inserir peça padrão</Modal.Title>
+      </Modal.Header>
+      <Modal.Body>
+        <Row className="g-3 align-items-end">
+          <Col md={7}>
+            <SearchableSelect label="Peça" value={newDefaultPart.part_id || ""} options={partOptions} onChange={selectDefaultPart} placeholder="Pesquisar peça" emptyMessage="Nenhuma peça encontrada." />
+          </Col>
+          <Col md={2}><Form.Label>Qtd.</Form.Label><IntegerInput min="0.01" step="0.01" value={newDefaultPart.quantity} onChange={(event) => setNewDefaultPart({ ...newDefaultPart, quantity: event.target.value })} /></Col>
+          <Col md={3}><Form.Label>Ordem</Form.Label><IntegerInput value={newDefaultPart.position} onChange={(event) => setNewDefaultPart({ ...newDefaultPart, position: event.target.value })} /></Col>
+          <Col md={4}><Form.Label>Unitário</Form.Label><MoneyInput value={newDefaultPart.unit_price} onChange={(value) => setNewDefaultPart({ ...newDefaultPart, unit_price: value })} /></Col>
+          <Col md={4}><Form.Label>Desconto</Form.Label><MoneyInput value={newDefaultPart.discount_amount} onChange={(value) => setNewDefaultPart({ ...newDefaultPart, discount_amount: value })} /></Col>
+          <Col md={4} className="d-flex flex-column gap-2">
+            <Form.Check label="Consumir estoque na OS" checked={!!newDefaultPart.consume_inventory} onChange={(event) => setNewDefaultPart({ ...newDefaultPart, consume_inventory: event.target.checked })} />
+            <Form.Check label="Ativa" checked={!!newDefaultPart.is_active} onChange={(event) => setNewDefaultPart({ ...newDefaultPart, is_active: event.target.checked })} />
+          </Col>
+          <Col md={12}><Form.Label>Observação padrão</Form.Label><Form.Control as="textarea" rows={2} value={newDefaultPart.notes} onChange={(event) => setNewDefaultPart({ ...newDefaultPart, notes: event.target.value })} placeholder="Ex.: trocar junto com a mão de obra" /></Col>
+        </Row>
+      </Modal.Body>
+      <Modal.Footer>
+        <Button type="button" variant="outline-secondary" onClick={closeDefaultPartModal}>Cancelar</Button>
+        <Button type="button" variant="success" onClick={addDefaultPart}>Inserir peça</Button>
+      </Modal.Footer>
+    </Modal>
+
+    <Modal show={showChecklistModal} onHide={closeChecklistModal} centered size="lg" backdrop="static">
+      <Modal.Header closeButton>
+        <Modal.Title>Inserir item de checklist</Modal.Title>
+      </Modal.Header>
+      <Modal.Body>
+        <Row className="g-3 align-items-end">
+          <Col md={8}><Form.Label>Descrição</Form.Label><Form.Control value={newChecklistItem.description} onChange={(event) => setNewChecklistItem({ ...newChecklistItem, description: event.target.value })} autoFocus /></Col>
+          <Col md={4}><Form.Label>Ordem</Form.Label><IntegerInput value={newChecklistItem.sort_order} onChange={(event) => setNewChecklistItem({ ...newChecklistItem, sort_order: event.target.value })} /></Col>
+          <Col md={12} className="d-flex gap-3 flex-wrap">
+            <Form.Check label="Obrigatório" checked={!!newChecklistItem.is_required} onChange={(event) => setNewChecklistItem({ ...newChecklistItem, is_required: event.target.checked })} />
+            <Form.Check label="Exigir foto" checked={!!newChecklistItem.requires_photo} onChange={(event) => setNewChecklistItem({ ...newChecklistItem, requires_photo: event.target.checked })} />
+            <Form.Check label="Exigir observação" checked={!!newChecklistItem.requires_note} onChange={(event) => setNewChecklistItem({ ...newChecklistItem, requires_note: event.target.checked })} />
+            <Form.Check label="Ativo" checked={!!newChecklistItem.is_active} onChange={(event) => setNewChecklistItem({ ...newChecklistItem, is_active: event.target.checked })} />
+          </Col>
+        </Row>
+      </Modal.Body>
+      <Modal.Footer>
+        <Button type="button" variant="outline-secondary" onClick={closeChecklistModal}>Cancelar</Button>
+        <Button type="button" variant="success" onClick={addChecklistTemplate}>Inserir item</Button>
+      </Modal.Footer>
     </Modal>
   </>;
 }

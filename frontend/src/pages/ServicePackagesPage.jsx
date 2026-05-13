@@ -111,6 +111,8 @@ export default function ServicePackagesPage() {
   const [search, setSearch] = useState("");
   const [activeTab, setActiveTab] = useState("package");
   const [error, setError] = useState("");
+  const [newPackageItem, setNewPackageItem] = useState(emptyItem());
+  const [showServiceItemModal, setShowServiceItemModal] = useState(false);
 
   const serviceOptions = [
     { value: "", label: "Manual" },
@@ -185,7 +187,9 @@ export default function ServicePackagesPage() {
         is_active: item.is_active,
         items: (item.items || []).map((line, index) => ({
           local_id: makeLocalId(),
-          service_id: line.service || "",
+          service_id: line.service || line.service_id || "",
+          service_name: line.service_name || "",
+          service_code: line.service_code || "",
           description: line.description || "",
           quantity: line.quantity || "1.00",
           unit_price: line.unit_price || "0.00",
@@ -199,19 +203,51 @@ export default function ServicePackagesPage() {
     setShow(true);
   }
 
-  function addItem() {
-    setForm((current) => ({
-      ...current,
-      items: [...current.items, { ...emptyItem(), position: current.items.length + 1 }],
-    }));
+  function openServiceItemModal() {
+    setNewPackageItem({ ...emptyItem(), position: form.items.length + 1 });
+    setShowServiceItemModal(true);
     setActiveTab("items");
   }
 
-  function updateItem(localId, changes) {
+  function closeServiceItemModal() {
+    setShowServiceItemModal(false);
+    setNewPackageItem({ ...emptyItem(), position: form.items.length + 1 });
+  }
+
+  function selectPackageService(serviceId) {
+    const selected = services.find((service) => String(service.id) === String(serviceId));
+    setNewPackageItem((current) => ({
+      ...current,
+      service_id: serviceId,
+      service_name: selected?.name || "",
+      service_code: selected?.code || "",
+      description: selected?.name || current.description || "",
+      unit_price: selected?.default_unit_price || current.unit_price || "0.00",
+    }));
+  }
+
+  function addItem() {
+    const description = String(newPackageItem.description || "").trim();
+    if (!description) {
+      setError("Informe a descrição do serviço antes de inserir no pacote.");
+      return;
+    }
+
     setForm((current) => ({
       ...current,
-      items: current.items.map((line) => (line.local_id === localId ? { ...line, ...changes } : line)),
+      items: [
+        ...current.items,
+        {
+          ...newPackageItem,
+          local_id: makeLocalId(),
+          description,
+          quantity: newPackageItem.quantity || "1.00",
+          unit_price: newPackageItem.unit_price || "0.00",
+          position: newPackageItem.position || current.items.length + 1,
+        },
+      ].map((line, index) => ({ ...line, position: line.position || index + 1 })),
     }));
+    closeServiceItemModal();
   }
 
   function removeItem(localId) {
@@ -221,15 +257,9 @@ export default function ServicePackagesPage() {
     }));
   }
 
-  function onServiceChange(localId, serviceId) {
-    const selected = services.find((service) => String(service.id) === String(serviceId));
-    const currentLine = form.items.find((line) => line.local_id === localId);
-    updateItem(localId, {
-      service_id: serviceId,
-      description: selected?.name || "",
-      quantity: currentLine?.quantity || "1",
-      unit_price: selected?.default_unit_price || "0.00",
-    });
+  function serviceLabel(line) {
+    const selected = services.find((service) => String(service.id) === String(line.service_id));
+    return [line.service_code || selected?.code, line.service_name || selected?.name || line.description].filter(Boolean).join(" - ") || "Serviço manual";
   }
 
   async function save(event) {
@@ -381,12 +411,13 @@ export default function ServicePackagesPage() {
                     <div className="form-section-title mb-1">Serviços do pacote</div>
                     <div className="text-muted small">Use o campo pesquisável para localizar serviços do catálogo rapidamente.</div>
                   </div>
-                  <Button size="sm" variant="outline-primary" type="button" onClick={addItem}>Adicionar serviço ao pacote</Button>
+                  <Button size="sm" variant="outline-primary" type="button" onClick={openServiceItemModal}>Inserir serviço</Button>
                 </div>
 
-                {form.items.length === 0 ? <EmptyState title="Nenhum serviço no pacote"/> : <Table responsive bordered>
+                {form.items.length === 0 ? <EmptyState title="Nenhum serviço no pacote" description="Clique em Inserir serviço para adicionar o primeiro item."/> : <Table responsive bordered className="align-middle">
                   <thead>
                     <tr>
+                      <th style={{ width: 90 }}>Ordem</th>
                       <th style={{ minWidth: 260 }}>Serviço</th>
                       <th>Descrição</th>
                       <th style={{ width: 120 }}>Qtd.</th>
@@ -397,18 +428,11 @@ export default function ServicePackagesPage() {
                   </thead>
                   <tbody>
                     {form.items.map((line) => <tr key={line.local_id}>
-                      <td>
-                        <SearchableSelect
-                          value={line.service_id || ""}
-                          options={serviceOptions}
-                          onChange={(value) => onServiceChange(line.local_id, value)}
-                          placeholder="Pesquisar serviço"
-                          emptyMessage="Nenhum serviço encontrado."
-                        />
-                      </td>
-                      <td><Form.Control required value={line.description} onChange={(event) => updateItem(line.local_id, { description: event.target.value })}/></td>
-                      <td><IntegerInput min="0.01" step="0.01" value={line.quantity} onChange={(event) => updateItem(line.local_id, { quantity: event.target.value })}/></td>
-                      <td><MoneyInput value={line.unit_price} onChange={(value) => updateItem(line.local_id, { unit_price: value })}/></td>
+                      <td>{line.position || "-"}</td>
+                      <td className="fw-semibold">{serviceLabel(line)}</td>
+                      <td>{line.description || "-"}</td>
+                      <td>{line.quantity || "1.00"}</td>
+                      <td>{money(line.unit_price || 0)}</td>
                       <td>{money(itemSubtotal(line))}</td>
                       <td className="text-end"><Button size="sm" variant="outline-danger" type="button" onClick={() => removeItem(line.local_id)}>Remover</Button></td>
                     </tr>)}
@@ -426,6 +450,49 @@ export default function ServicePackagesPage() {
         </Modal.Body>
         <TabbedFormFooter tabs={tabs} activeKey={activeTab} onSelect={setActiveTab} onCancel={() => setShow(false)} saveLabel="Salvar" />
       </Form>
+    </Modal>
+
+    <Modal show={showServiceItemModal} onHide={closeServiceItemModal} centered size="lg" backdrop="static">
+      <Modal.Header closeButton>
+        <Modal.Title>Inserir serviço no pacote</Modal.Title>
+      </Modal.Header>
+      <Modal.Body>
+        <Row className="g-3 align-items-end">
+          <Col md={7}>
+            <SearchableSelect
+              label="Serviço"
+              value={newPackageItem.service_id || ""}
+              options={serviceOptions}
+              onChange={selectPackageService}
+              placeholder="Pesquisar serviço"
+              emptyMessage="Nenhum serviço encontrado."
+            />
+          </Col>
+          <Col md={2}>
+            <Form.Label>Qtd.</Form.Label>
+            <IntegerInput min="0.01" step="0.01" value={newPackageItem.quantity} onChange={(event) => setNewPackageItem({ ...newPackageItem, quantity: event.target.value })}/>
+          </Col>
+          <Col md={3}>
+            <Form.Label>Ordem</Form.Label>
+            <IntegerInput value={newPackageItem.position} onChange={(event) => setNewPackageItem({ ...newPackageItem, position: event.target.value })}/>
+          </Col>
+          <Col md={8}>
+            <Form.Label>Descrição</Form.Label>
+            <Form.Control required value={newPackageItem.description || ""} onChange={(event) => setNewPackageItem({ ...newPackageItem, description: event.target.value })} placeholder="Descrição que aparecerá no pacote" autoFocus />
+          </Col>
+          <Col md={4}>
+            <Form.Label>Unitário</Form.Label>
+            <MoneyInput value={newPackageItem.unit_price} onChange={(value) => setNewPackageItem({ ...newPackageItem, unit_price: value })}/>
+          </Col>
+          <Col md={12} className="text-end form-muted-box">
+            Subtotal do serviço: <strong>{money(itemSubtotal(newPackageItem))}</strong>
+          </Col>
+        </Row>
+      </Modal.Body>
+      <Modal.Footer>
+        <Button type="button" variant="outline-secondary" onClick={closeServiceItemModal}>Cancelar</Button>
+        <Button type="button" variant="success" onClick={addItem}>Inserir serviço</Button>
+      </Modal.Footer>
     </Modal>
   </>;
 }
