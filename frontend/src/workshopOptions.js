@@ -30,9 +30,42 @@ export function formatMoneyInput(value) {
 }
 
 export function parseMoneyInput(value) {
-  const digits = String(value || "").replace(/\D/g, "");
-  if (!digits) return "";
-  return (Number(digits) / 100).toFixed(2);
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+
+  const normalizedSign = raw.startsWith("-") ? "-" : "";
+  const cleaned = raw.replace(/[^\d,.-]/g, "");
+  if (!/\d/.test(cleaned)) return "";
+
+  const unsigned = cleaned.replace(/-/g, "");
+  const lastComma = unsigned.lastIndexOf(",");
+  const lastDot = unsigned.lastIndexOf(".");
+  const decimalSeparatorIndex = Math.max(lastComma, lastDot);
+
+  let normalized = "";
+
+  if (decimalSeparatorIndex >= 0) {
+    const separator = unsigned[decimalSeparatorIndex];
+    const integerPart = unsigned.slice(0, decimalSeparatorIndex).replace(/\D/g, "");
+    const decimalPart = unsigned.slice(decimalSeparatorIndex + 1).replace(/\D/g, "");
+    const hasMixedSeparators = unsigned.includes(",") && unsigned.includes(".");
+    const separatorCount = unsigned.split(separator).length - 1;
+
+    // Uma única pontuação com 3 dígitos depois costuma ser separador de milhar
+    // digitado/colado pelo usuário. Ex.: "1.234" => 1234.00.
+    const onlyThousandsSeparator = !hasMixedSeparators && separatorCount === 1 && decimalPart.length === 3;
+
+    if (onlyThousandsSeparator) {
+      normalized = `${integerPart}${decimalPart}`;
+    } else {
+      normalized = `${integerPart || "0"}.${decimalPart}`;
+    }
+  } else {
+    normalized = unsigned.replace(/\D/g, "");
+  }
+
+  const parsed = Number(`${normalizedSign}${normalized}`);
+  return Number.isFinite(parsed) ? parsed.toFixed(2) : "";
 }
 
 export function datetimeLocalValue(value) {

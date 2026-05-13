@@ -9,8 +9,8 @@
     "preview": "vite preview",
     "quality": "npm run build && npm run test:security && npm audit --omit=dev --audit-level=low",
     "clean": "node -e \"const fs=require('fs'); for (const p of ['dist']) fs.rmSync(p,{recursive:true,force:true});\"",
-    "test": "vitest run --environment jsdom",
-    "test:security": "vitest run --environment jsdom src/utils/sanitizeHtml.test.js"
+    "test": "vitest run --environment jsdom --pool=forks --poolOptions.forks.singleFork=true",
+    "test:security": "vitest run --environment jsdom --pool=forks --poolOptions.forks.singleFork=true src/utils/sanitizeHtml.test.js"
   },
   "dependencies": {
     "axios": "^1.7.9",
