@@ -514,3 +514,13 @@ GET /api/workshop/bottom-navigation/
 ```
 
 O endpoint retorna somente botões ativos e permitidos para o usuário logado. A migration `workshop.0032_bottomnavigationitem` cria botões iniciais para Início, OS, Kanban, Nova OS, Estoque e Financeiro.
+
+## Produção: câmera do celular
+
+Para os campos de foto abrirem a câmera no celular, a aplicação precisa ser servida em contexto seguro: `https://` em produção ou `localhost` em desenvolvimento. Em produção via Nginx, o header `Permissions-Policy` deve permitir câmera para a própria origem:
+
+```nginx
+add_header Permissions-Policy "camera=(self), microphone=(), geolocation=(), payment=()" always;
+```
+
+Se houver proxy reverso, CDN ou load balancer na frente do container, confirme que ele não sobrescreve esse header com `camera=()`.
