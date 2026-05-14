@@ -3,6 +3,7 @@ import { Alert, Button, Card, Col, Container, Row, Spinner } from "react-bootstr
 import { Link } from "react-router-dom";
 import api, { apiError } from "../api/client";
 import { money } from "../workshopOptions";
+import { applyBrowserBranding } from "../utils/branding";
 
 function initials(name = "OF") {
   return String(name || "OF").split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
@@ -17,6 +18,7 @@ export default function LandingPage() {
       try {
         const { data: response } = await api.get("/workshop/public/landing/");
         setData(response);
+        applyBrowserBranding(response);
       } catch (err) {
         setError(apiError(err));
       }

@@ -868,6 +868,7 @@ class WorkOrderCustomerApprovalPublicSerializer(serializers.ModelSerializer):
             "phone": profile.phone_e164,
             "email": profile.email,
             "address": profile.address_display,
+            "logo_url": profile.logo.url if profile.logo else "",
         }
 
     def get_work_order(self, obj):

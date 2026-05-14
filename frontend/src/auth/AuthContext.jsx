@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from "
 import api, { clearAuthState, logoutSession } from "../api/client";
 import { defaultDashboardPath, hasPermission } from "./permissions";
 import { applyAdminTheme, defaultThemeSettings } from "../theme";
+import { applyBrowserBranding, resetBrowserBranding } from "../utils/branding";
 
 const AuthContext = createContext(null);
 
@@ -15,10 +16,23 @@ export function AuthProvider({ children }) {
       const { data } = await api.get("/workshop/company-profile/");
       setWorkshopProfile(data);
       applyAdminTheme(data);
+      applyBrowserBranding(data);
       return data;
     } catch {
       setWorkshopProfile(null);
       applyAdminTheme(defaultThemeSettings);
+      resetBrowserBranding();
+      return null;
+    }
+  }
+
+  async function loadPublicBranding() {
+    try {
+      const { data } = await api.get("/workshop/public/landing/");
+      applyBrowserBranding(data);
+      return data;
+    } catch {
+      resetBrowserBranding();
       return null;
     }
   }
@@ -34,6 +48,7 @@ export function AuthProvider({ children }) {
       setUser(null);
       setWorkshopProfile(null);
       applyAdminTheme(defaultThemeSettings);
+      await loadPublicBranding();
       return null;
     } finally {
       setLoading(false);
@@ -47,6 +62,7 @@ export function AuthProvider({ children }) {
       setUser(null);
       setWorkshopProfile(null);
       applyAdminTheme(defaultThemeSettings);
+      resetBrowserBranding();
       setLoading(false);
     }
 
@@ -59,6 +75,7 @@ export function AuthProvider({ children }) {
     setUser(null);
     setWorkshopProfile(null);
     applyAdminTheme(defaultThemeSettings);
+    await loadPublicBranding();
 
     await api.post("/token/", { username, password });
 
@@ -71,6 +88,7 @@ export function AuthProvider({ children }) {
       setUser(null);
       setWorkshopProfile(null);
       applyAdminTheme(defaultThemeSettings);
+      resetBrowserBranding();
       throw new Error("Login realizado, mas não foi possível carregar os dados do usuário. Verifique se o backend está rodando e tente novamente.");
     }
   }
@@ -80,6 +98,7 @@ export function AuthProvider({ children }) {
     setUser(null);
     setWorkshopProfile(null);
     applyAdminTheme(defaultThemeSettings);
+    await loadPublicBranding();
   }
 
   const value = useMemo(

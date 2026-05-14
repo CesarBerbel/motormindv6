@@ -4,6 +4,7 @@ import { useParams } from "react-router-dom";
 import api, { apiError, apiUrl } from "../api/client";
 import SystemToast from "../components/SystemToast";
 import { money } from "../workshopOptions";
+import { applyBrowserBranding } from "../utils/branding";
 
 function dateTime(value) {
   return value ? new Date(value).toLocaleString("pt-BR") : "-";
@@ -41,6 +42,7 @@ export default function CustomerApprovalPage() {
       setLoading(true);
       const { data } = await api.get(`${endpointBase}/${token}/`);
       setApproval(data);
+      applyBrowserBranding(data.workshop || {});
       setForm((current) => ({ ...current, name: current.name || data.customer_name_snapshot || "" }));
       if (isEstimateApproval && data.can_decide) {
         setSelectedServices((data.services || []).map((item) => Number(item.id)));
@@ -120,6 +122,7 @@ export default function CustomerApprovalPage() {
         : { ...form, decision };
       const { data } = await api.post(`${endpointBase}/${token}/`, payload);
       setApproval(data);
+      applyBrowserBranding(data.workshop || {});
       setNotice(decision === "approved" ? "Documento aprovado com sucesso." : "Documento recusado com sucesso.");
     } catch (err) {
       setError(apiError(err));

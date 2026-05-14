@@ -13,7 +13,7 @@ export function apiUrl(path = "") {
   return `${base}${normalizedPath}`;
 }
 
-const publicEndpoints = ["/token/", "/token/refresh/", "/token/logout/", "/password-setup/confirm/", "/workshop/customer-approvals/", "/attendance/estimate-approvals/"];
+const publicEndpoints = ["/token/", "/token/refresh/", "/token/logout/", "/password-setup/confirm/", "/workshop/customer-approvals/", "/attendance/estimate-approvals/", "/workshop/public/landing/"];
 let refreshPromise = null;
 
 const NUMERIC_ZERO_FIELDS = new Set([
