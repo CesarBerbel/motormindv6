@@ -40,7 +40,7 @@ class WorkshopProfileSerializer(serializers.ModelSerializer):
             "bank_info",
             "pix_key",
             "technical_checklist_enabled",
-            "delivery_signature_enabled",
+            "delivery_signature_enabled", "delivery_with_pending_payment_allowed",
             "landing_enabled",
             "landing_headline",
             "landing_subheadline",
@@ -155,4 +155,19 @@ class PublicLandingSerializer(serializers.ModelSerializer):
         services = WorkshopService.objects.filter(is_active=True, is_featured=True).order_by("name")[:6]
         return WorkshopServiceSerializer(services, many=True, context={"request": request}).data
 
+class BottomNavigationItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BottomNavigationItem
+        fields = [
+            "id",
+            "label",
+            "path",
+            "icon",
+            "permission_code",
+            "position",
+            "highlight",
+            "open_in_new_tab",
+            "is_active",
+        ]
+        read_only_fields = ["id"]
 

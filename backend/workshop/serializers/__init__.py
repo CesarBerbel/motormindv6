@@ -5,7 +5,7 @@ Este modulo funciona como fachada de compatibilidade para manter imports antigos
 por exemplo: ``from workshop.serializers import WorkOrderSerializer``.
 """
 
-from .profile import WorkshopProfileSerializer, PublicLandingSerializer
+from .profile import WorkshopProfileSerializer, PublicLandingSerializer, BottomNavigationItemSerializer
 from .catalog import (
     WorkshopServiceChecklistTemplateSerializer,
     ServiceDefaultPartSerializer,
@@ -51,6 +51,7 @@ from .work_orders import (
 __all__ = [
     "WorkshopProfileSerializer",
     "PublicLandingSerializer",
+    "BottomNavigationItemSerializer",
     "WorkshopServiceChecklistTemplateSerializer",
     "ServiceDefaultPartSerializer",
     "GeneralCategorySerializer",

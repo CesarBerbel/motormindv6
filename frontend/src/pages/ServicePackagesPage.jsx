@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Button, Card, Col, Form, Modal, Row, Table } from "react-bootstrap";
+import { Button, Card, Col, Form, Modal, Row, Table } from "../ui/TailwindPrimitives.jsx";
 import IntegerInput from "../components/IntegerInput";
 import api, { apiError, results } from "../api/client";
 import EmptyState from "../components/EmptyState";

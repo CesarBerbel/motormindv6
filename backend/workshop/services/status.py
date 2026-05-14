@@ -46,8 +46,8 @@ def technical_move_work_order(work_order, action, actor=None, note="", send_noti
         default_note = "OS concluída pela Bancada Técnica."
         source = SOURCE_TECHNICAL_COMPLETE
     else:
-        if current not in {WorkOrder.Status.OPEN, WorkOrder.Status.IN_PROGRESS}:
-            raise ValidationError({"status": "Somente OS aberta ou em execução pode ir para Aguardando peças."})
+        if current not in {WorkOrder.Status.OPEN, WorkOrder.Status.IN_PROGRESS, WorkOrder.Status.PAUSED}:
+            raise ValidationError({"status": "Somente OS aberta, em execução ou pausada pode ir para Aguardando peças."})
         target = WorkOrder.Status.WAITING_PARTS
         default_note = "OS movida para Aguardando peças pela Bancada Técnica."
         source = SOURCE_TECHNICAL_WAITING_PARTS
@@ -72,7 +72,7 @@ def change_work_order_status(work_order, new_status, actor=None, note="", send_n
         old_status = locked.status
         before = model_snapshot(
             locked,
-            ["number", "status", "manual_discount_amount", "discount_total", "grand_total", "paid_total", "balance_due", "started_at", "completed_at", "delivered_at", "cancelled_at", "cancellation_reason"],
+            ["number", "status", "financial_status", "manual_discount_amount", "discount_total", "grand_total", "paid_total", "balance_due", "started_at", "completed_at", "delivered_at", "cancelled_at", "cancellation_reason"],
         )
         _set_work_order_status(locked, new_status, actor=actor, note=note, source=source, save=True)
         if locked.status in {WorkOrder.Status.IN_PROGRESS, WorkOrder.Status.COMPLETED}:
@@ -84,7 +84,7 @@ def change_work_order_status(work_order, new_status, actor=None, note="", send_n
             user=actor,
             description=note or f"Status da OS alterado para {locked.status_label}.",
             before=before,
-            after=model_snapshot(locked, ["number", "status", "manual_discount_amount", "discount_total", "grand_total", "paid_total", "balance_due", "started_at", "completed_at", "delivered_at", "cancelled_at", "cancellation_reason"]),
+            after=model_snapshot(locked, ["number", "status", "financial_status", "manual_discount_amount", "discount_total", "grand_total", "paid_total", "balance_due", "started_at", "completed_at", "delivered_at", "cancelled_at", "cancellation_reason"]),
             metadata={"old_status": old_status, "new_status": locked.status, "source": source},
             reason=note,
         )

@@ -113,14 +113,15 @@ class FinancialAuditTrailApiTests(APITestCase):
 
     def test_work_order_discount_change_is_audited(self):
         customer = Contact.objects.create(first_name="Cliente", last_name="Desconto", email="cliente-desconto@example.com")
-        order = WorkOrder.objects.create(customer=customer, title="OS desconto", created_by=self.user, updated_by=self.user)
+        vehicle = Vehicle.objects.create(customer=customer, plate="DES1C23", make="VW", model="Gol", year=2020)
+        order = WorkOrder.objects.create(customer=customer, vehicle=vehicle, title="OS desconto", created_by=self.user, updated_by=self.user)
         WorkOrderService.objects.create(work_order=order, description="Serviço com desconto", quantity="1.00", unit_price="150.00")
         order.refresh_from_db()
         order.recalculate_totals()
 
         response = self.client.patch(
             f"/api/workshop/work-orders/{order.id}/",
-            {"customer_id": customer.id, "manual_discount_amount": "25.00"},
+            {"customer_id": customer.id, "vehicle_id": vehicle.id, "manual_discount_amount": "25.00"},
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)

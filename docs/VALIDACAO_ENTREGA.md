@@ -32,7 +32,7 @@ O projeto foi preparado para esses comandos, com `package-lock.json`, `requireme
 
 - Banco padrão configurado como PostgreSQL em `backend/config/settings.py`, `backend/.env.example`, `.env.example`, `backend/.env.docker.example` e `.env.docker.example`.
 - Docker Compose com PostgreSQL, Redis, backend, worker, beat e frontend.
-- Frontend com build Vite, React 18, React Router, Axios, Bootstrap 5 e React Bootstrap.
+- Frontend com build Vite, React 18, React Router, Axios, Tailwind CSS e componentes locais.
 - Backend com Django REST Framework, Simple JWT via cookies HttpOnly, CORS/CSRF, django-filter, drf-spectacular, Redis/Celery e sanitização com bleach.
 - Design system administrativo persistido em `WorkshopProfile`, com migration `0029_workshopprofile_design_system.py`.
 - Nova aba `Configurações administrativas > Visual e formulários`, com prévia e tokens globais.

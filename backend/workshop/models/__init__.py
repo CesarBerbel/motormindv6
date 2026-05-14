@@ -6,7 +6,7 @@ por exemplo: ``from workshop.models import WorkOrder``.
 """
 
 from .common import *
-from .profile import WorkshopProfile
+from .profile import WorkshopProfile, BottomNavigationItem
 from .catalog import (
     GeneralCategory,
     PartBrand,
@@ -52,6 +52,7 @@ __all__ = [
     "validate_file_size",
     "generate_prefixed_sequence_code",
     "WorkshopProfile",
+    "BottomNavigationItem",
     "GeneralCategory",
     "PartBrand",
     "WorkshopService",

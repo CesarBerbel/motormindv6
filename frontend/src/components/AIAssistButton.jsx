@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Alert, Button, Form, Modal, Spinner } from "react-bootstrap";
+import { Alert, Button, Form, Modal, Spinner } from "../ui/TailwindPrimitives.jsx";
 import api, { apiError } from "../api/client";
 
 const labels = {

@@ -3,6 +3,7 @@ from django.contrib import admin
 from .models import (
     GeneralCategory,
     WorkshopProfile,
+    BottomNavigationItem,
     PartBrand,
     Part,
     PartStockMovement,
@@ -36,7 +37,7 @@ class WorkshopProfileAdmin(admin.ModelAdmin):
         ("Contato", {"fields": ("email", "phone_e164", "secondary_phone_e164", "website")}),
         ("Endereço", {"fields": ("zip_code", "address_line", "address_number", "address_complement", "district", "city", "state", "country")}),
         ("Impressões", {"fields": ("responsible_name", "print_header_text", "print_footer_text", "estimate_terms", "work_order_terms", "purchase_order_terms", "bank_info", "pix_key")}),
-        ("Operação", {"fields": ("technical_checklist_enabled", "delivery_signature_enabled")}),
+        ("Operação", {"fields": ("technical_checklist_enabled", "delivery_signature_enabled", "delivery_with_pending_payment_allowed")}),
         ("Landing page pública", {"fields": ("landing_enabled", "landing_headline", "landing_subheadline", "landing_cta_label", "landing_highlight_text")}),
         ("Design system administrativo", {"fields": ("ui_theme_mode", "ui_primary_color", "ui_accent_color", "ui_sidebar_color", "ui_form_density", "ui_table_density", "ui_card_radius", "ui_button_style", "ui_form_layout", "ui_show_required_hint", "ui_enable_motion")}),
         ("Auditoria", {"fields": ("created_at", "updated_at")}),
@@ -46,6 +47,22 @@ class WorkshopProfileAdmin(admin.ModelAdmin):
         if WorkshopProfile.objects.exists():
             return False
         return super().has_add_permission(request)
+
+
+@admin.register(BottomNavigationItem)
+class BottomNavigationItemAdmin(admin.ModelAdmin):
+    list_display = ("position", "label", "path", "icon", "permission_code", "highlight", "open_in_new_tab", "is_active")
+    list_display_links = ("label",)
+    list_editable = ("position", "highlight", "open_in_new_tab", "is_active")
+    search_fields = ("label", "path", "permission_code")
+    list_filter = ("icon", "highlight", "open_in_new_tab", "is_active")
+    ordering = ("position", "label")
+    fieldsets = (
+        ("Botão", {"fields": ("label", "path", "icon", "position", "highlight", "is_active")}),
+        ("Acesso", {"fields": ("permission_code", "open_in_new_tab")}),
+        ("Auditoria", {"fields": ("created_at", "updated_at")}),
+    )
+    readonly_fields = ("created_at", "updated_at")
 
 
 @admin.register(GeneralCategory)
@@ -148,9 +165,9 @@ class WorkOrderPhotoInline(admin.TabularInline):
 
 @admin.register(WorkOrder)
 class WorkOrderAdmin(admin.ModelAdmin):
-    list_display = ("number", "customer", "vehicle", "order_type", "status", "priority", "grand_total", "balance_due", "created_at")
+    list_display = ("number", "customer", "vehicle", "order_type", "status", "financial_status", "priority", "grand_total", "balance_due", "created_at")
     search_fields = ("number", "customer__first_name", "customer__last_name", "vehicle__plate", "title", "reference_work_order__number")
-    list_filter = ("order_type", "status", "priority")
+    list_filter = ("order_type", "status", "financial_status", "priority")
     inlines = [WorkOrderPhotoInline]
 
 

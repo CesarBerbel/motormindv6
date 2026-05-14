@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Badge, Button, Card, Col, Form, Modal, Row, Spinner, Table } from "react-bootstrap";
+import { Badge, Button, Card, Col, Form, Modal, Row, Spinner, Table } from "../ui/TailwindPrimitives.jsx";
 import { Link, useLocation } from "react-router-dom";
 import api, { apiError, results } from "../api/client";
 import AreaTabs from "../components/AreaTabs";
@@ -11,13 +11,15 @@ import { money, priorities } from "../workshopOptions";
 import SearchAutocompleteInput from "../components/SearchAutocompleteInput";
 import { buildReturnToState } from "../utils/returnTo";
 
-const ESTIMATE_FINAL_STATUSES = new Set(["approved", "partially_approved", "rejected", "expired", "converted", "cancelled"]);
+const ESTIMATE_FINAL_STATUSES = new Set(["approved", "rejected", "expired", "converted", "cancelled"]);
 const STATUS_FILTER_OPTIONS = [
   { value: "open", label: "Aberta" },
-  { value: "in_progress", label: "Diagnóstico / execução" },
+  { value: "in_progress", label: "Em execução" },
   { value: "awaiting_approval", label: "Aguardando aprovação" },
   { value: "waiting_parts", label: "Aguardando peças" },
-  { value: "completed", label: "Concluída / finalizada" },
+  { value: "completed", label: "Concluída" },
+  { value: "delivered", label: "Entregue" },
+  { value: "cancelled", label: "Cancelada" },
 ];
 
 async function fetchAll(endpoint, params = {}) {
@@ -49,8 +51,7 @@ function itemRoute(item) {
 
 function visualStatus(item) {
   if (kindOf(item) !== "estimate") return item.status;
-  if (item.status === "diagnosis") return "in_progress";
-  if (item.status === "awaiting_approval") return "awaiting_approval";
+  if (item.status === "sent") return "awaiting_approval";
   if (ESTIMATE_FINAL_STATUSES.has(item.status)) return "completed";
   return "open";
 }
@@ -150,13 +151,13 @@ function sortItems(a, b) {
 }
 
 function canSendApproval(item) {
-  if (kindOf(item) === "estimate") return ["open", "rejected", "awaiting_approval"].includes(item.status);
-  return ["open", "in_progress", "waiting_parts"].includes(item.status) && !item.has_pending_approval && !item.requires_revision_estimate;
+  if (kindOf(item) === "estimate") return ["draft", "sent"].includes(item.status);
+  return ["open", "in_progress", "waiting_parts", "awaiting_approval", "paused"].includes(item.status) && !item.has_pending_approval && !item.requires_revision_estimate;
 }
 
 function canCancelItem(item) {
-  if (kindOf(item) === "estimate") return ["open", "diagnosis", "awaiting_approval", "rejected", "expired"].includes(item.status);
-  return ["open", "in_progress", "waiting_parts"].includes(item.status);
+  if (kindOf(item) === "estimate") return ["draft", "sent", "approved"].includes(item.status);
+  return ["open", "in_progress", "waiting_parts", "awaiting_approval", "paused"].includes(item.status);
 }
 
 function cancelEndpoint(item) {

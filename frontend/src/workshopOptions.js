@@ -1,4 +1,5 @@
-export const workOrderStatuses = [["open", "Aberta"], ["in_progress", "Em execução"], ["waiting_parts", "Aguardando peças"], ["completed", "Concluída"]];
+export const workOrderStatuses = [["open", "Aberta"], ["in_progress", "Em execução"], ["waiting_parts", "Aguardando peças"], ["awaiting_approval", "Aguardando aprovação"], ["paused", "Pausada"], ["completed", "Concluída"], ["delivered", "Entregue"], ["cancelled", "Cancelada"]];
+export const workOrderFinancialStatuses = [["pending", "Pendente"], ["partial", "Parcial"], ["paid", "Pago"], ["cancelled", "Cancelado"]];
 export const kanbanWorkOrderStatuses = workOrderStatuses;
 export const priorities = [["low", "Baixa"], ["normal", "Normal"], ["high", "Alta"], ["urgent", "Urgente"]];
 export const workOrderTypes = [["standard", "Normal"], ["return", "Retorno"], ["warranty", "Garantia"]];
@@ -9,7 +10,7 @@ export const purchaseOrderStatuses = [["draft", "Rascunho"], ["requested", "Soli
 export const payableStatuses = [["open", "Aberta"], ["partial", "Parcial"], ["paid", "Paga"], ["overdue", "Vencida"], ["cancelled", "Cancelada"]];
 export const payableRecurrenceTypes = [["cash", "À vista"], ["installment", "Parcelada"], ["fixed_monthly", "Fixa mensal"]];
 export const counterSaleStatuses = [["draft", "Rascunho"], ["finalized", "Finalizada"], ["cancelled", "Cancelada"]];
-export const estimateStatuses = [["open", "Aberto"], ["diagnosis", "Em diagnóstico"], ["awaiting_approval", "Aguardando aprovação"], ["approved", "Aprovado"], ["partially_approved", "Aprovado parcialmente"], ["rejected", "Rejeitado"], ["expired", "Expirado"], ["converted", "Convertido em OS"], ["cancelled", "Cancelado"]];
+export const estimateStatuses = [["draft", "Rascunho"], ["sent", "Enviado"], ["approved", "Aprovado"], ["rejected", "Recusado"], ["expired", "Expirado"], ["cancelled", "Cancelado"], ["converted", "Convertido em OS"]];
 export const payablePaymentMethods = [["cash", "Dinheiro"], ["pix", "PIX"], ["bank_transfer", "Transferência bancária"], ["debit_card", "Cartão de débito"], ["credit_card", "Cartão de crédito"], ["boleto", "Boleto"], ["other", "Outro"]];
 export const vehicleSteeringTypes = [["", "Não informado"], ["manual", "Mecânica"], ["hydraulic", "Hidráulica"], ["electric", "Elétrica"], ["electro_hydraulic", "Eletro-hidráulica"]];
 export const vehicleTransmissionTypes = [["", "Não informado"], ["manual", "Manual"], ["automatic", "Automático"], ["automated", "Automatizado"], ["cvt", "CVT"], ["dual_clutch", "Dupla embreagem"]];

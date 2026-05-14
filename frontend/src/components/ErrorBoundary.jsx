@@ -1,5 +1,5 @@
 import React from "react";
-import { Alert, Button, Card, Container } from "react-bootstrap";
+import { Alert, Button, Card, Container } from "../ui/TailwindPrimitives.jsx";
 
 export default class ErrorBoundary extends React.Component {
   constructor(props) {

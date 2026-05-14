@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Alert, Button, Card, Col, Form, Modal, Row, Table } from "react-bootstrap";
+import { Alert, Button, Card, Col, Form, Modal, Row, Table } from "../ui/TailwindPrimitives.jsx";
+import PhotoCaptureInput from "../components/PhotoCaptureInput";
 import IntegerInput from "../components/IntegerInput";
 import api, { apiError, results } from "../api/client";
 import EmptyState from "../components/EmptyState";
@@ -637,13 +638,15 @@ export default function WorkshopServicesPage() {
                     </div>
                   </Col>
                   <Col md={7}>
-                    <Form.Label>Arquivo do thumbnail</Form.Label>
-                    <Form.Control
-                      type="file"
-                      accept="image/png,image/jpeg,image/webp"
-                      onChange={(event) => { setPhotoFile(event.target.files?.[0] || null); setRemovePhoto(false); }}
+                    <Form.Label>Thumbnail do serviço</Form.Label>
+                    <PhotoCaptureInput
+                      id="service-thumbnail-photo"
+                      cameraLabel="Tirar foto"
+                      galleryLabel="Escolher arquivo"
+                      onFileChange={(file) => { setPhotoFile(file); setRemovePhoto(false); }}
+                      summary={photoFile ? photoFile.name : "Nenhuma foto selecionada"}
+                      helpText="No celular, toque em Tirar foto para abrir a câmera. Use uma imagem simples para aparecer no card de seleção da OS. Tamanho máximo validado no backend: 5 MB."
                     />
-                    <Form.Text>Use uma imagem simples para aparecer no card de seleção da OS. Tamanho máximo validado no backend: 5 MB.</Form.Text>
                     <div className="d-flex gap-2 mt-3">
                       <Button type="button" variant="outline-secondary" onClick={() => { setPhotoFile(null); setRemovePhoto(false); }}>Limpar seleção</Button>
                       {editing?.photo_url || photoFile ? <Button type="button" variant="outline-danger" onClick={() => { setPhotoFile(null); setRemovePhoto(true); }}>Remover thumbnail</Button> : null}

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Form } from "react-bootstrap";
+import { Form } from "../ui/TailwindPrimitives.jsx";
 import { formatMoneyEditingValue, formatMoneyInput, parseMoneyInput } from "../workshopOptions";
 
 function formatEditingDraft(value) {

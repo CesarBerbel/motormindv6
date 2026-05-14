@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { Badge, Button, Card, Col, Form, Modal, Row, Table } from "react-bootstrap";
+import { Badge, Button, Card, Col, Form, Modal, Row, Table } from "../ui/TailwindPrimitives.jsx";
+import PhotoCaptureInput from "../components/PhotoCaptureInput";
 import DateInput from "../components/DateInput";
 import api, { apiError, results } from "../api/client";
 import PageHeader from "../components/PageHeader";
@@ -252,8 +253,14 @@ export default function UsersPage() {
           </Col>
           <Col md={8}>
             <Form.Label>Foto 3x4 do funcionário</Form.Label>
-            <Form.Control type="file" accept="image/png,image/jpeg,image/webp" disabled={editingOwner} onChange={(event) => { setPhotoFile(event.target.files?.[0] || null); setRemovePhoto(false); }} />
-            <Form.Text>Use uma foto frontal, preferencialmente no padrão 3x4, para identificação interna. Tamanho máximo validado no backend: 3 MB.</Form.Text>
+            <PhotoCaptureInput
+              id="employee-photo-3x4"
+              disabled={editingOwner}
+              cameraLabel="Tirar foto 3x4"
+              onFileChange={(file) => { setPhotoFile(file); setRemovePhoto(false); }}
+              summary={photoFile ? photoFile.name : "Nenhuma foto selecionada"}
+              helpText="No celular, toque em Tirar foto 3x4 para abrir a câmera. Use uma foto frontal para identificação interna. Tamanho máximo validado no backend: 3 MB."
+            />
             <div className="d-flex gap-2 mt-3">
               <Button type="button" variant="outline-secondary" disabled={editingOwner} onClick={() => { setPhotoFile(null); setRemovePhoto(false); }}>Limpar seleção</Button>
               {editing?.photo_3x4_url || photoFile ? <Button type="button" variant="outline-danger" disabled={editingOwner} onClick={() => { setPhotoFile(null); setRemovePhoto(true); }}>Remover foto</Button> : null}

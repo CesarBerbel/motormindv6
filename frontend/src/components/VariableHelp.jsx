@@ -1,5 +1,5 @@
 import React from "react";
-import { Card } from "react-bootstrap";
+import { Card } from "../ui/TailwindPrimitives.jsx";
 
 export const templateVariables = [
   { code: "{{ nome_usuario }}", description: "Nome do usuário logado/remetente" },

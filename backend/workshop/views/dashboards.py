@@ -135,7 +135,7 @@ class TechnicalDashboardView(APIView):
         from attendance.models import Estimate
 
         qs = Estimate.objects.select_related("customer", "vehicle", "converted_work_order", "revision_work_order").filter(
-            status__in=[Estimate.Status.OPEN, Estimate.Status.DIAGNOSIS, Estimate.Status.AWAITING_APPROVAL]
+            status__in=[Estimate.Status.DRAFT, Estimate.Status.SENT]
         )
         search = request.query_params.get("search")
         if search:
@@ -183,9 +183,9 @@ class TechnicalDashboardView(APIView):
         queue_qs = qs.filter(status=WorkOrder.Status.OPEN).order_by("priority", "promised_at", "id")
         active_qs = qs.filter(status=WorkOrder.Status.IN_PROGRESS).order_by("priority", "promised_at", "id")
         waiting_parts_qs = qs.filter(status=WorkOrder.Status.WAITING_PARTS).order_by("priority", "promised_at", "id")
-        approval_estimate_qs = estimate_qs.filter(status=Estimate.Status.AWAITING_APPROVAL).order_by("valid_until", "id")
-        estimate_queue_qs = estimate_qs.filter(status=Estimate.Status.OPEN).order_by("valid_until", "id")
-        estimate_diagnosis_qs = estimate_qs.filter(status=Estimate.Status.DIAGNOSIS).order_by("valid_until", "id")
+        approval_estimate_qs = estimate_qs.filter(status=Estimate.Status.SENT).order_by("valid_until", "id")
+        estimate_queue_qs = estimate_qs.filter(status=Estimate.Status.DRAFT).order_by("valid_until", "id")
+        estimate_diagnosis_qs = Estimate.objects.none()
         done_qs = WorkOrder.objects.select_related("customer", "vehicle", "assigned_to").filter(status=WorkOrder.Status.COMPLETED).order_by("-updated_at", "-completed_at", "id")[:30]
         today = timezone.localdate()
         selected = self._selected_technician(request)
@@ -200,7 +200,7 @@ class TechnicalDashboardView(APIView):
             for user in self._technicians()
         ]
         queue_items = self._serialize_orders(queue_qs) + self._serialize_estimates(estimate_queue_qs)
-        active_items = self._serialize_orders(active_qs) + self._serialize_estimates(estimate_diagnosis_qs)
+        active_items = self._serialize_orders(active_qs)
         approval_items = self._serialize_estimates(approval_estimate_qs)
         waiting_parts_items = self._serialize_orders(waiting_parts_qs)
         done_items = self._serialize_orders(done_qs, limit=30)
@@ -213,7 +213,7 @@ class TechnicalDashboardView(APIView):
                 "queue_estimates": estimate_queue_qs.count(),
                 "active": len(active_items),
                 "active_work_orders": active_qs.count(),
-                "active_estimates": estimate_diagnosis_qs.count(),
+                "active_estimates": 0,
                 "awaiting_approval": approval_estimate_qs.count(),
                 "waiting_parts": waiting_parts_qs.count(),
                 "done": WorkOrder.objects.filter(status=WorkOrder.Status.COMPLETED).count(),

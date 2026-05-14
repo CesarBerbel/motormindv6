@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Badge, Button, Card, Col, Form, Modal, Row, Table } from "react-bootstrap";
+import { Badge, Button, Card, Col, Form, Modal, Row, Table } from "../ui/TailwindPrimitives.jsx";
 import { Link, useLocation } from "react-router-dom";
 import api, { apiError, results } from "../api/client";
 import EmptyState from "../components/EmptyState";

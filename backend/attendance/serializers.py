@@ -10,7 +10,7 @@ from messaging.serializers import ContactSerializer
 from workshop.models import Part, ServicePackage, Vehicle, WorkshopProfile, WorkshopService
 from workshop.serializers import PartSerializer, VehicleSerializer, WorkOrderDetailSerializer
 
-from .models import CounterSale, CounterSaleItem, CounterSalePayment, Estimate, EstimateCustomerApproval, EstimatePartItem, EstimateServiceItem
+from .models import CounterSale, CounterSaleItem, CounterSalePayment, Estimate, EstimateCustomerApproval, EstimatePartItem, EstimateServiceItem, EstimateStatusHistory
 from .services import ESTIMATE_EDITABLE_STATUSES, cancel_counter_sale, cancel_estimate, change_estimate_status, convert_estimate_to_work_order, decide_estimate_approval, finalize_counter_sale, manually_approve_estimate, register_counter_sale_payment
 
 User = get_user_model()
@@ -257,9 +257,21 @@ class EstimatePartItemSerializer(serializers.ModelSerializer):
         return attrs
 
 
+class EstimateStatusHistorySerializer(serializers.ModelSerializer):
+    actor_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = EstimateStatusHistory
+        fields = ["id", "estimate", "old_status", "new_status", "description", "data", "actor_name", "created_at"]
+        read_only_fields = fields
+
+    def get_actor_name(self, obj):
+        return obj.actor.get_full_name() or obj.actor.username if obj.actor else ""
+
+
 class EstimateSerializer(serializers.ModelSerializer):
     customer_id = serializers.PrimaryKeyRelatedField(source="customer", queryset=Contact.objects.filter(is_active=True), write_only=True)
-    vehicle_id = serializers.PrimaryKeyRelatedField(source="vehicle", queryset=Vehicle.objects.filter(is_active=True), required=False, allow_null=True, write_only=True)
+    vehicle_id = serializers.PrimaryKeyRelatedField(source="vehicle", queryset=Vehicle.objects.filter(is_active=True), required=True, allow_null=False, write_only=True)
     customer = ContactSerializer(read_only=True)
     customer_name = serializers.CharField(source="customer.full_name", read_only=True)
     vehicle = VehicleSerializer(read_only=True)
@@ -271,6 +283,20 @@ class EstimateSerializer(serializers.ModelSerializer):
     converted_work_order_detail = WorkOrderDetailSerializer(source="converted_work_order", read_only=True)
     revision_work_order_detail = WorkOrderDetailSerializer(source="revision_work_order", read_only=True)
     can_edit = serializers.SerializerMethodField()
+    status_history = EstimateStatusHistorySerializer(many=True, read_only=True)
+    cliente_id = serializers.IntegerField(source="customer_id", read_only=True)
+    veiculo_id = serializers.IntegerField(source="vehicle_id", read_only=True)
+    ordem_servico_id = serializers.IntegerField(read_only=True)
+    data_criacao = serializers.DateTimeField(read_only=True)
+    data_envio = serializers.DateTimeField(read_only=True)
+    data_validade = serializers.DateField(read_only=True)
+    data_aprovacao = serializers.DateTimeField(read_only=True)
+    data_cancelamento = serializers.DateTimeField(read_only=True)
+    motivo_cancelamento = serializers.CharField(read_only=True)
+    motivo_recusa = serializers.CharField(read_only=True)
+    forma_aprovacao = serializers.CharField(read_only=True)
+    valor_total = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    observacoes = serializers.CharField(read_only=True)
 
     class Meta:
         model = Estimate
@@ -279,9 +305,11 @@ class EstimateSerializer(serializers.ModelSerializer):
             "number",
             "customer",
             "customer_id",
+            "cliente_id",
             "customer_name",
             "vehicle",
             "vehicle_id",
+            "veiculo_id",
             "vehicle_display",
             "title",
             "complaint",
@@ -291,6 +319,11 @@ class EstimateSerializer(serializers.ModelSerializer):
             "status",
             "status_label",
             "valid_until",
+            "data_criacao",
+            "data_envio",
+            "data_validade",
+            "data_aprovacao",
+            "data_cancelamento",
             "tank_level_percent",
             "tank_level_label",
             "sent_at",
@@ -300,21 +333,31 @@ class EstimateSerializer(serializers.ModelSerializer):
             "cancelled_at",
             "cancelled_by",
             "cancellation_reason",
+            "motivo_cancelamento",
+            "rejection_reason",
+            "motivo_recusa",
+            "approved_by",
+            "approval_method",
+            "forma_aprovacao",
             "converted_work_order",
+            "ordem_servico_id",
             "converted_work_order_detail",
             "revision_work_order",
             "revision_work_order_detail",
             "can_edit",
+            "status_history",
             "subtotal_services",
             "subtotal_parts",
             "discount_amount",
             "total_amount",
+            "valor_total",
+            "observacoes",
             "services",
             "parts",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "number", "customer", "customer_name", "vehicle", "vehicle_display", "status", "status_label", "tank_level_label", "sent_at", "approved_at", "rejected_at", "converted_at", "cancelled_at", "cancelled_by", "cancellation_reason", "converted_work_order", "converted_work_order_detail", "revision_work_order", "revision_work_order_detail", "can_edit", "subtotal_services", "subtotal_parts", "total_amount", "created_at", "updated_at"]
+        read_only_fields = ["id", "number", "customer", "cliente_id", "customer_name", "vehicle", "veiculo_id", "vehicle_display", "status", "status_label", "tank_level_label", "sent_at", "data_criacao", "data_envio", "data_validade", "approved_at", "data_aprovacao", "rejected_at", "converted_at", "cancelled_at", "data_cancelamento", "cancelled_by", "cancellation_reason", "motivo_cancelamento", "rejection_reason", "motivo_recusa", "approved_by", "approval_method", "forma_aprovacao", "converted_work_order", "ordem_servico_id", "converted_work_order_detail", "revision_work_order", "revision_work_order_detail", "can_edit", "status_history", "subtotal_services", "subtotal_parts", "total_amount", "valor_total", "observacoes", "created_at", "updated_at"]
 
     def get_can_edit(self, obj):
         return obj.status in ESTIMATE_EDITABLE_STATUSES
@@ -322,10 +365,14 @@ class EstimateSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         customer = attrs.get("customer", getattr(self.instance, "customer", None))
         vehicle = attrs.get("vehicle", getattr(self.instance, "vehicle", None))
+        if not customer:
+            raise serializers.ValidationError({"customer_id": "Informe o cliente do orçamento."})
+        if not vehicle:
+            raise serializers.ValidationError({"vehicle_id": "Informe o veículo do orçamento."})
         if vehicle and customer and vehicle.customer_id != customer.id:
             raise serializers.ValidationError({"vehicle_id": "O veículo informado pertence a outro cliente."})
         if self.instance and self.instance.status not in ESTIMATE_EDITABLE_STATUSES:
-            raise serializers.ValidationError("Orçamento só pode ser editado quando estiver aberto ou recusado. Orçamento em diagnóstico, aguardando aprovação, aprovado, expirado, convertido ou cancelado não pode ser alterado.")
+            raise serializers.ValidationError("Orçamento só pode ser editado enquanto estiver em rascunho. Orçamentos enviados, aprovados, recusados, expirados, cancelados ou convertidos ficam bloqueados operacionalmente.")
         return attrs
 
     def _sync_services(self, estimate, services_data):

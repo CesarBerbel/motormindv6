@@ -29,7 +29,7 @@ class ReportsApiTests(APITestCase):
         PartStockMovement.objects.create(part=self.part, movement_type=PartStockMovement.MovementType.CONSUMPTION, quantity=Decimal("-2.00"), unit_cost=Decimal("35.00"), work_order=self.order, actor=self.user)
         AccountReceivable.objects.create(customer=self.customer, description="Receber relatório", amount=Decimal("230.00"), due_date=timezone.localdate())
         AccountPayable.objects.create(description="Pagar relatório", category="Teste", amount=Decimal("80.00"), due_date=timezone.localdate(), created_by=self.user)
-        self.estimate = Estimate.objects.create(customer=self.customer, vehicle=self.vehicle, title="Orçamento relatório", status=Estimate.Status.AWAITING_APPROVAL, valid_until=timezone.localdate(), total_amount=Decimal("180.00"), created_by=self.user)
+        self.estimate = Estimate.objects.create(customer=self.customer, vehicle=self.vehicle, title="Orçamento relatório", status=Estimate.Status.SENT, valid_until=timezone.localdate(), total_amount=Decimal("180.00"), created_by=self.user)
 
     def test_executive_summary_report(self):
         response = self.client.get("/api/reports/executive-summary/")

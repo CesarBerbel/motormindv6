@@ -1,6 +1,6 @@
 # MotorMindV6 - Auto Mec Bandeirantes
 
-Projeto full stack para a **Auto Mec Bandeirantes**, com **Django 5 + Django REST Framework + PostgreSQL + Redis/Celery + React 18 + Vite + Bootstrap 5**. O sistema contém uma área administrativa própria em React, separada do Django Admin, cobrindo oficina, ordens de serviço, orçamentos, estoque, compras, financeiro, atendimento, mensageria, relatórios e assistente de IA.
+Projeto full stack para a **Auto Mec Bandeirantes**, com **Django 5 + Django REST Framework + PostgreSQL + Redis/Celery + React 18 + Vite + Tailwind CSS**. O sistema contém uma área administrativa própria em React, separada do Django Admin, cobrindo oficina, ordens de serviço, orçamentos, estoque, compras, financeiro, atendimento, mensageria, relatórios e assistente de IA.
 
 ## Módulos principais
 
@@ -465,3 +465,52 @@ As chaves e o provedor de IA são configurados somente no admin do Django em **A
 Também é possível cadastrar múltiplos prompts em **Assistente de IA > Prompts de IA**. Cada prompt pode ser associado a uma finalidade, como relato do cliente, diagnóstico, serviço realizado, email, WhatsApp ou templates. Nas telas, o usuário escolhe apenas o prompt que deseja aplicar.
 
 Se a resposta sair cortada, aumente o campo **max_tokens** na configuração de IA do admin. O padrão novo é 2500 tokens.
+
+## Frontend Tailwind CSS e PWA
+
+O frontend não depende de Bootstrap. A interface usa Tailwind CSS, componentes locais em `frontend/src/ui/TailwindPrimitives.jsx` e CSS global em `frontend/src/styles.css` para manter compatibilidade visual com os fluxos administrativos existentes.
+
+Arquivos principais:
+
+- `frontend/tailwind.config.js`
+- `frontend/postcss.config.js`
+- `frontend/src/ui/TailwindPrimitives.jsx`
+- `frontend/public/manifest.webmanifest`
+- `frontend/public/sw.js`
+- `frontend/src/pwa/registerServiceWorker.js`
+- `frontend/public/pwa-icon-192.png`
+- `frontend/public/pwa-icon-512.png`
+
+Comandos úteis do frontend:
+
+```bash
+cd frontend
+npm install
+npm run build
+npm test
+npm run quality
+```
+
+O PWA é registrado apenas no build de produção. Em desenvolvimento (`npm run dev`), o service worker fica desativado para evitar cache agressivo durante ajustes.
+
+## Menu inferior mobile configurável
+
+O frontend administrativo possui um menu inferior fixo para telas mobile. Os botões são cadastrados no Django Admin em **Workshop > Menu inferior do app**.
+
+Cada botão permite configurar:
+
+- **Rótulo**: texto exibido abaixo do ícone.
+- **Rota do frontend**: caminho interno, por exemplo `/work-orders`, `/work-orders/new` ou `/finance/dashboard`. Também aceita URLs externas `https://...`.
+- **Ícone**: escolha visual exibida no app.
+- **Permissão necessária**: código funcional usado pelo frontend/backend, como `work_orders.view`, `work_orders.create`, `parts.manage` ou `finance.view`. Para aceitar mais de uma permissão, separe por vírgula.
+- **Ordem**: posição do botão no menu.
+- **Destacar botão**: aplica destaque visual, útil para ações principais como “Nova OS”.
+- **Ativo**: permite remover temporariamente o botão sem excluir o cadastro.
+
+A API autenticada usada pelo frontend é:
+
+```http
+GET /api/workshop/bottom-navigation/
+```
+
+O endpoint retorna somente botões ativos e permitidos para o usuário logado. A migration `workshop.0032_bottomnavigationitem` cria botões iniciais para Início, OS, Kanban, Nova OS, Estoque e Financeiro.

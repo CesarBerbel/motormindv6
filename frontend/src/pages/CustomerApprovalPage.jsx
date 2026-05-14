@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Alert, Badge, Button, Card, Col, Container, Form, Row, Spinner, Table } from "react-bootstrap";
+import { Alert, Badge, Button, Card, Col, Container, Form, Row, Spinner, Table } from "../ui/TailwindPrimitives.jsx";
 import { useParams } from "react-router-dom";
 import api, { apiError, apiUrl } from "../api/client";
 import SystemToast from "../components/SystemToast";

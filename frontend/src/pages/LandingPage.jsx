@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Alert, Button, Card, Col, Container, Row, Spinner } from "react-bootstrap";
+import { Alert, Button, Card, Col, Container, Row, Spinner } from "../ui/TailwindPrimitives.jsx";
 import { Link } from "react-router-dom";
 import api, { apiError } from "../api/client";
 import { money } from "../workshopOptions";

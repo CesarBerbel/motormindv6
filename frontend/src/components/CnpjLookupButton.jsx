@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Button } from "react-bootstrap";
+import { Button } from "../ui/TailwindPrimitives.jsx";
 import { lookupCnpj } from "../utils/cnpj";
 
 export default function CnpjLookupButton({ cnpj, onFound, onError, className = "px-2 text-nowrap" }) {

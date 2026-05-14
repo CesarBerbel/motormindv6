@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Badge, Card, Col, Row, Table } from "react-bootstrap";
+import { Badge, Card, Col, Row, Table } from "../ui/TailwindPrimitives.jsx";
 import { Link } from "react-router-dom";
 import api, { apiError } from "../api/client";
 import EmptyState from "../components/EmptyState";

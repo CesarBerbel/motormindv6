@@ -7,10 +7,19 @@ from .vehicles import Vehicle
 class WorkOrder(TimeStampedModel):
     class Status(models.TextChoices):
         OPEN = "open", "Aberta"
-        IN_PROGRESS = "in_progress", "Em execucao"
-        WAITING_PARTS = "waiting_parts", "Aguardando pecas"
-        COMPLETED = "completed", "Concluida"
+        IN_PROGRESS = "in_progress", "Em execução"
+        WAITING_PARTS = "waiting_parts", "Aguardando peças"
+        AWAITING_APPROVAL = "awaiting_approval", "Aguardando aprovação"
+        PAUSED = "paused", "Pausada"
+        COMPLETED = "completed", "Concluída"
+        DELIVERED = "delivered", "Entregue"
         CANCELLED = "cancelled", "Cancelada"
+
+    class FinancialStatus(models.TextChoices):
+        PENDING = "pending", "Pendente"
+        PARTIAL = "partial", "Parcial"
+        PAID = "paid", "Pago"
+        CANCELLED = "cancelled", "Cancelado"
 
     class Priority(models.TextChoices):
         LOW = "low", "Baixa"
@@ -33,6 +42,7 @@ class WorkOrder(TimeStampedModel):
     internal_notes = models.TextField(blank=True)
     customer_notes = models.TextField(blank=True)
     status = models.CharField(max_length=30, choices=Status.choices, default=Status.OPEN, db_index=True)
+    financial_status = models.CharField(max_length=20, choices=FinancialStatus.choices, default=FinancialStatus.PENDING, db_index=True)
     priority = models.CharField(max_length=20, choices=Priority.choices, default=Priority.NORMAL)
     order_type = models.CharField(max_length=20, choices=OrderType.choices, default=OrderType.STANDARD, db_index=True)
     reference_work_order = models.ForeignKey("self", null=True, blank=True, on_delete=models.PROTECT, related_name="referenced_by_work_orders")
@@ -71,6 +81,74 @@ class WorkOrder(TimeStampedModel):
     @property
     def status_label(self):
         return self.get_status_display()
+
+    @property
+    def financial_status_label(self):
+        return self.get_financial_status_display()
+
+    @property
+    def status_operacional(self):
+        return self.status
+
+    @property
+    def status_financeiro(self):
+        return self.financial_status
+
+    @property
+    def orcamento_id(self):
+        return self.source_estimate_id
+
+    @property
+    def data_abertura(self):
+        return self.opened_at
+
+    @property
+    def data_inicio(self):
+        return self.started_at
+
+    @property
+    def data_conclusao(self):
+        return self.completed_at
+
+    @property
+    def data_entrega(self):
+        return self.delivered_at
+
+    @property
+    def data_cancelamento(self):
+        return self.cancelled_at
+
+    @property
+    def motivo_cancelamento(self):
+        return self.cancellation_reason
+
+    @property
+    def km_entrada(self):
+        return self.mileage_in
+
+    @property
+    def km_saida(self):
+        return self.mileage_out
+
+    @property
+    def problema_relatado(self):
+        return self.complaint
+
+    @property
+    def observacoes_cliente(self):
+        return self.customer_notes
+
+    @property
+    def observacoes_internas(self):
+        return self.internal_notes
+
+    @property
+    def valor_total(self):
+        return self.grand_total
+
+    @property
+    def responsavel_id(self):
+        return self.assigned_to_id
 
     @property
     def priority_label(self):
@@ -116,8 +194,17 @@ class WorkOrder(TimeStampedModel):
         self.grand_total = grand_total if grand_total > ZERO else ZERO
         self.paid_total = paid_total
         self.balance_due = self.grand_total - paid_total
+        if self.status == self.Status.CANCELLED and paid_total <= ZERO:
+            self.financial_status = self.FinancialStatus.CANCELLED
+        elif self.grand_total > ZERO and paid_total >= self.grand_total:
+            self.financial_status = self.FinancialStatus.PAID
+            self.balance_due = ZERO
+        elif paid_total > ZERO:
+            self.financial_status = self.FinancialStatus.PARTIAL
+        else:
+            self.financial_status = self.FinancialStatus.PENDING
         if save:
-            self.save(update_fields=["subtotal_services", "subtotal_parts", "manual_discount_amount", "discount_total", "grand_total", "paid_total", "balance_due", "updated_at"])
+            self.save(update_fields=["subtotal_services", "subtotal_parts", "manual_discount_amount", "discount_total", "grand_total", "paid_total", "balance_due", "financial_status", "updated_at"])
         return self
 
     def __str__(self):
@@ -742,12 +829,10 @@ class WorkOrderNotificationRule(TimeStampedModel):
             return dict(WorkOrder.Status.choices).get(self.trigger_status, self.trigger_status)
         if self.entity_type == self.EntityType.ESTIMATE:
             estimate_statuses = {
-                "open": "Aberto",
-                "diagnosis": "Em diagnostico",
-                "awaiting_approval": "Aguardando aprovacao",
+                "draft": "Rascunho",
+                "sent": "Enviado",
                 "approved": "Aprovado",
-                "partially_approved": "Aprovado parcialmente",
-                "rejected": "Rejeitado",
+                "rejected": "Recusado",
                 "expired": "Expirado",
                 "converted": "Convertido em OS",
                 "cancelled": "Cancelado",
@@ -764,7 +849,7 @@ class WorkOrderNotificationRule(TimeStampedModel):
             if self.trigger_status not in valid_statuses:
                 raise ValidationError({"trigger_status": "Status gatilho inválido para ordem de serviço."})
         elif self.entity_type == self.EntityType.ESTIMATE:
-            valid_statuses = {"open", "diagnosis", "awaiting_approval", "approved", "partially_approved", "rejected", "expired", "converted", "cancelled"}
+            valid_statuses = {"draft", "sent", "approved", "rejected", "expired", "converted", "cancelled"}
             if self.trigger_status not in valid_statuses:
                 raise ValidationError({"trigger_status": "Status gatilho inválido para orçamento."})
 

@@ -16,6 +16,7 @@ from ..models import (
     GeneralCategory,
     ZERO,
     WorkshopProfile,
+    BottomNavigationItem,
     PartBrand,
     PART_UNIT_CHOICES,
     normalize_lookup_name,

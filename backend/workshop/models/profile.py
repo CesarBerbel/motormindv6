@@ -36,6 +36,7 @@ class WorkshopProfile(TimeStampedModel):
     pix_key = models.CharField(max_length=120, blank=True, verbose_name="Chave Pix")
     technical_checklist_enabled = models.BooleanField(default=False, verbose_name="Usar checklist técnico nas OS")
     delivery_signature_enabled = models.BooleanField(default=True, verbose_name="Usar assinatura digital na entrega")
+    delivery_with_pending_payment_allowed = models.BooleanField(default=False, verbose_name="Permitir entrega de veículo com pagamento pendente")
     landing_enabled = models.BooleanField(default=True, verbose_name="Landing page pública habilitada")
     landing_headline = models.CharField(max_length=180, blank=True, verbose_name="Título da landing page")
     landing_subheadline = models.TextField(blank=True, verbose_name="Subtítulo da landing page")
@@ -110,4 +111,64 @@ class WorkshopProfile(TimeStampedModel):
     def __str__(self):
         return self.display_name
 
+class BottomNavigationItem(TimeStampedModel):
+    """Botão configurável do menu inferior mobile exibido no frontend administrativo."""
+
+    ICON_CHOICES = [
+        ("attendance", "Atendimento"),
+        ("wrench", "Chave / Oficina"),
+        ("receipt", "Ordem / Recibo"),
+        ("clipboard", "Checklist"),
+        ("car", "Veículo"),
+        ("box", "Estoque"),
+        ("cart", "Venda"),
+        ("finance", "Financeiro"),
+        ("chart", "Relatórios"),
+        ("message", "Mensagens"),
+        ("users", "Clientes / Usuários"),
+        ("tools", "Ferramentas"),
+        ("package", "Pacote"),
+        ("gear", "Configurações"),
+        ("send", "Enviar"),
+        ("bell", "Notificações"),
+        ("health", "Saúde do sistema"),
+        ("audit", "Auditoria"),
+        ("home", "Início"),
+        ("plus", "Adicionar"),
+    ]
+
+    label = models.CharField(max_length=32, verbose_name="Rótulo")
+    path = models.CharField(max_length=180, verbose_name="Rota do frontend")
+    icon = models.CharField(max_length=30, choices=ICON_CHOICES, default="receipt", verbose_name="Ícone")
+    permission_code = models.CharField(
+        max_length=160,
+        blank=True,
+        verbose_name="Permissão necessária",
+        help_text="Opcional. Use uma permissão do sistema, como work_orders.view. Para alternativas, separe por vírgula.",
+    )
+    position = models.PositiveSmallIntegerField(default=10, db_index=True, verbose_name="Ordem")
+    highlight = models.BooleanField(default=False, verbose_name="Destacar botão")
+    open_in_new_tab = models.BooleanField(default=False, verbose_name="Abrir em nova aba")
+    is_active = models.BooleanField(default=True, db_index=True, verbose_name="Ativo")
+
+    class Meta:
+        ordering = ["position", "label"]
+        verbose_name = "botão do menu inferior"
+        verbose_name_plural = "menu inferior do app"
+
+    @property
+    def permission_codes(self):
+        raw = (self.permission_code or "").replace(";", ",")
+        return [part.strip() for part in raw.split(",") if part.strip()]
+
+    def clean(self):
+        super().clean()
+        self.label = (self.label or "").strip()
+        self.path = (self.path or "").strip()
+        if self.path and not (self.path.startswith("/") or self.path.startswith("http://") or self.path.startswith("https://")):
+            self.path = f"/{self.path}"
+        self.permission_code = (self.permission_code or "").strip()
+
+    def __str__(self):
+        return self.label
 

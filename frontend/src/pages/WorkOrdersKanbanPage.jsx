@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Alert, Badge, Button, Card, Col, Form, Row, Spinner } from "react-bootstrap";
+import { Alert, Badge, Button, Card, Col, Form, Row, Spinner } from "../ui/TailwindPrimitives.jsx";
 import { Link, useLocation } from "react-router-dom";
 import api, { apiError, apiUrl, results } from "../api/client";
 import ErrorAlert from "../components/ErrorAlert";
@@ -15,25 +15,35 @@ const OS_STATUS_LABELS = {
   open: "Aberta",
   in_progress: "Em execução",
   waiting_parts: "Aguardando peças",
+  awaiting_approval: "Aguardando aprovação",
+  paused: "Pausada",
   completed: "Concluída",
+  delivered: "Entregue",
+  cancelled: "Cancelada",
 };
 
-const ESTIMATE_FINAL_STATUSES = new Set(["approved", "partially_approved", "rejected", "expired", "converted", "cancelled"]);
+const ESTIMATE_FINAL_STATUSES = new Set(["approved", "rejected", "expired", "converted", "cancelled"]);
 
 const OPERATIONAL_COLUMNS = [
   { key: "open", label: "Aberta", description: "OS abertas e orçamentos abertos aguardando triagem." },
-  { key: "in_progress", label: "Diagnóstico / execução", description: "OS em execução e orçamentos em diagnóstico técnico." },
-  { key: "awaiting_approval", label: "Aguardando aprovação", description: "Orçamentos aguardando aprovação integral ou parcial do cliente." },
+  { key: "in_progress", label: "Em execução", description: "OS em execução." },
+  { key: "awaiting_approval", label: "Aguardando aprovação", description: "OS ou orçamentos enviados para aprovação do cliente." },
   { key: "waiting_parts", label: "Aguardando peças", description: "Somente OS entram nesta etapa. Orçamentos não aguardam peça." },
-  { key: "completed", label: "Concluída / finalizada", description: "OS concluídas e orçamentos aprovados, rejeitados, cancelados ou convertidos." },
+  { key: "paused", label: "Pausada", description: "OS pausadas com motivo registrado." },
+  { key: "completed", label: "Concluída", description: "OS concluídas e orçamentos em estado final." },
+  { key: "delivered", label: "Entregue", description: "OS entregues ao cliente." },
+  { key: "cancelled", label: "Cancelada", description: "OS canceladas." },
 ];
 
 const STATUS_FILTER_OPTIONS = [
   { value: "open", label: "Aberta" },
-  { value: "in_progress", label: "Diagnóstico / execução" },
+  { value: "in_progress", label: "Em execução" },
   { value: "awaiting_approval", label: "Aguardando aprovação" },
   { value: "waiting_parts", label: "Aguardando peças" },
-  { value: "completed", label: "Concluída / finalizada" },
+  { value: "paused", label: "Pausada" },
+  { value: "completed", label: "Concluída" },
+  { value: "delivered", label: "Entregue" },
+  { value: "cancelled", label: "Cancelada" },
 ];
 
 async function fetchAll(endpoint, params = {}) {
@@ -69,8 +79,7 @@ function itemPdfPath(item) {
 
 function visualStatus(item) {
   if (kindOf(item) !== "estimate") return item.status;
-  if (item.status === "diagnosis") return "in_progress";
-  if (item.status === "awaiting_approval") return "awaiting_approval";
+  if (item.status === "sent") return "awaiting_approval";
   if (ESTIMATE_FINAL_STATUSES.has(item.status)) return "completed";
   return "open";
 }
@@ -148,15 +157,15 @@ function itemSearchSuggestion(item) {
 }
 
 function canDragItem(item) {
-  if (kindOf(item) === "estimate") return ["open", "diagnosis", "awaiting_approval"].includes(item.status);
+  if (kindOf(item) === "estimate") return item.status === "draft";
   return Boolean(item.available_status_transitions?.length);
 }
 
 function nextStepHint(item) {
   if (kindOf(item) === "estimate") {
-    if (item.status === "open") return "Pode ir para diagnóstico ou aguardando aprovação.";
-    if (item.status === "diagnosis") return "Pode ir para aguardando aprovação.";
-    if (item.status === "awaiting_approval") return "A aprovação integral/parcial abre uma OS nova.";
+    if (item.status === "draft") return "Rascunho: envie para aprovação do cliente.";
+    if (item.status === "sent") return "Aguardando aprovação do cliente. Ao aprovar, uma OS será aberta.";
+    if (item.status === "approved") return "Aprovado: pode ser convertido em OS.";
     return "Fluxo finalizado no orçamento.";
   }
   return item.available_status_transitions?.length
@@ -165,9 +174,7 @@ function nextStepHint(item) {
 }
 
 function canEstimateMoveTo(item, columnKey) {
-  if (columnKey === "open") return item.status === "diagnosis";
-  if (columnKey === "in_progress") return ["open", "awaiting_approval"].includes(item.status);
-  if (columnKey === "awaiting_approval") return ["open", "diagnosis"].includes(item.status);
+  if (columnKey === "awaiting_approval") return item.status === "draft";
   return false;
 }
 
@@ -325,12 +332,7 @@ export default function WorkOrdersKanbanPage() {
       const response = await api.post(`/attendance/estimates/${item.id}/create-customer-approval/`, {});
       setNotice(`${item.number} movido para aguardando aprovação.${response.data?.public_url ? " Link público gerado." : ""}`);
     } else {
-      const nextStatus = columnKey === "open" ? "open" : "diagnosis";
-      const response = await api.post(`/attendance/estimates/${item.id}/change-status/`, {
-        status: nextStatus,
-        note: "Status alterado pelo Kanban operacional.",
-      });
-      setNotice(`${item.number} movido para ${response.data?.status_label || "a nova etapa"}.`);
+      throw new Error(`${item.number} só pode sair de rascunho pelo envio para aprovação.`);
     }
     await load(search, status, priority, kind);
   }
@@ -367,7 +369,7 @@ export default function WorkOrdersKanbanPage() {
   }
 
   return <div className="kanban-page">
-    <PageHeader title="Kanban operacional" subtitle="Arraste OS e orçamentos entre as etapas. Orçamento não entra em Aguardando peças; aprovação integral/parcial gera uma OS nova.">
+    <PageHeader title="Kanban operacional" subtitle="Arraste OS e envie orçamentos rascunho para aprovação. Orçamento aprovado gera OS pelo fluxo de conversão.">
       <div className="d-flex gap-2 flex-wrap justify-content-end">
         <Button as={Link} to="/work-orders/new" state={returnState}>Nova OS</Button>
         <Button as={Link} to="/work-orders/estimates/new" state={returnState} variant="success">Novo orçamento</Button>

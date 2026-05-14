@@ -48,7 +48,7 @@ A base do design system está em `frontend/src/components`:
 Exemplo recomendado:
 
 ```jsx
-import { Button, Form } from "react-bootstrap";
+import { Button, Form } from "../ui/TailwindPrimitives.jsx";
 import { AdminField, AdminFormGrid, AdminFormSection } from "../components/AdminForm";
 
 export default function MinhaTela() {
@@ -73,7 +73,7 @@ export default function MinhaTela() {
 
 ## Como o tema é aplicado
 
-`frontend/src/theme.js` normaliza os dados vindos do backend e escreve variáveis CSS no `document.documentElement`. O CSS global usa essas variáveis para Bootstrap, cards, botões, campos, tabelas, modais, menu lateral e componentes customizados.
+`frontend/src/theme.js` normaliza os dados vindos do backend e escreve variáveis CSS no `document.documentElement`. O CSS global usa essas variáveis para Tailwind, cards, botões, campos, tabelas, modais, menu lateral e componentes customizados.
 
 O carregamento acontece no `AuthContext` após `GET /api/workshop/company-profile/`. Na página de configurações, a prévia é aplicada enquanto o usuário altera os campos, antes de salvar.
 

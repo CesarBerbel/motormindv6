@@ -108,15 +108,15 @@ class EstimateCustomerApprovalFlowTests(TestCase):
         self.assertEqual(self.estimate.subtotal_parts, Decimal("880.00"))
         self.assertNotEqual(self.estimate_part_one.total_amount, Decimal("2800.00"))
 
-    def test_estimate_items_can_only_change_when_open_or_rejected(self):
-        self.estimate.status = Estimate.Status.AWAITING_APPROVAL
+    def test_estimate_items_can_only_change_when_draft(self):
+        self.estimate.status = Estimate.Status.SENT
         self.estimate.save(update_fields=["status", "updated_at"])
 
         self.estimate_service_one.unit_price = Decimal("199.00")
         with self.assertRaises(ValidationError):
             self.estimate_service_one.save()
 
-        self.estimate.status = Estimate.Status.REJECTED
+        self.estimate.status = Estimate.Status.DRAFT
         self.estimate.save(update_fields=["status", "updated_at"])
         self.estimate_service_one.unit_price = Decimal("199.00")
         self.estimate_service_one.save()
@@ -147,7 +147,7 @@ class EstimateCustomerApprovalFlowTests(TestCase):
             actor=self.user,
         )
         self.assertEqual(revision.revision_work_order, work_order)
-        self.assertEqual(revision.status, Estimate.Status.OPEN)
+        self.assertEqual(revision.status, Estimate.Status.DRAFT)
         self.assertEqual(revision.services.count(), 1)
 
         _manual_approval, reopened_order = manually_approve_estimate(
@@ -366,16 +366,16 @@ class EstimateCustomerApprovalFlowTests(TestCase):
         config.default_from_email = "oficina@example.com"
         config.save()
         template = MessageTemplate.objects.create(
-            name="Orçamento em diagnóstico",
+            name="Orçamento enviado",
             channel=MessageTemplate.Channel.EMAIL,
-            email_subject="Orçamento {{ numero_orcamento }} em diagnóstico",
+            email_subject="Orçamento {{ numero_orcamento }} enviado",
             email_html_body="Olá {{ nome_cliente }}, orçamento {{ numero_orcamento }} está {{ status_orcamento }}.",
             email_text_body="Olá {{ nome_cliente }}, orçamento {{ numero_orcamento }} está {{ status_orcamento }}.",
         )
         rule = WorkOrderNotificationRule.objects.create(
-            name="Avisar cliente quando orçamento entrar em diagnóstico",
+            name="Avisar cliente quando orçamento for enviado",
             entity_type=WorkOrderNotificationRule.EntityType.ESTIMATE,
-            trigger_status=Estimate.Status.DIAGNOSIS,
+            trigger_status=Estimate.Status.SENT,
             channel=MessageTemplate.Channel.EMAIL,
             template=template,
             recipient_target=WorkOrderNotificationRule.RecipientTarget.CUSTOMER,
@@ -386,18 +386,18 @@ class EstimateCustomerApprovalFlowTests(TestCase):
         with self.captureOnCommitCallbacks(execute=True):
             change_estimate_status(
                 self.estimate,
-                Estimate.Status.DIAGNOSIS,
+                Estimate.Status.SENT,
                 actor=self.user,
-                note="Iniciar diagnóstico do orçamento.",
+                note="Enviar orçamento para aprovação.",
                 send_notifications=True,
             )
 
         self.estimate.refresh_from_db()
-        self.assertEqual(self.estimate.status, Estimate.Status.DIAGNOSIS)
+        self.assertEqual(self.estimate.status, Estimate.Status.SENT)
         self.assertEqual(len(mail.outbox), 1)
         self.assertIn("cliente-orcamento@example.com", mail.outbox[0].to)
         self.assertIn(self.estimate.number, mail.outbox[0].subject)
         self.assertEqual(MessageLog.objects.filter(status=MessageLog.Status.SENT).count(), 1)
         relation = WorkOrderMessage.objects.get(estimate=self.estimate, notification_rule=rule)
         self.assertIsNone(relation.work_order)
-        self.assertEqual(relation.trigger_status, Estimate.Status.DIAGNOSIS)
+        self.assertEqual(relation.trigger_status, Estimate.Status.SENT)

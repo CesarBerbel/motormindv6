@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { Badge, Button, Container, Navbar } from "react-bootstrap";
+import { Badge, Button, Container, Navbar } from "../ui/TailwindPrimitives.jsx";
 import { useAuth } from "../auth/AuthContext";
 import { hasPermission } from "../auth/permissions";
+import BottomNavigation from "./BottomNavigation";
 
 const iconPaths = {
   attendance: "M7 11a4 4 0 1 1 8 0v1h1a3 3 0 0 1 3 3v4h-2v-4a1 1 0 0 0-1-1h-1v2H7v-2H6a1 1 0 0 0-1 1v4H3v-4a3 3 0 0 1 3-3h1v-1Zm2 3h4v-3a2 2 0 1 0-4 0v3Z",
@@ -166,6 +167,7 @@ export default function Layout() {
   const { user, workshopProfile, logout } = useAuth();
   const location = useLocation();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem("sidebar_collapsed") === "true");
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const groups = visibleGroups(user);
   const activeGroupTitle = groups.find((group) => groupIsActive(group, location.pathname))?.title;
 
@@ -173,8 +175,24 @@ export default function Layout() {
     localStorage.setItem("sidebar_collapsed", String(sidebarCollapsed));
   }, [sidebarCollapsed]);
 
+  useEffect(() => {
+    setMobileSidebarOpen(false);
+  }, [location.pathname]);
+
+  function isMobileViewport() {
+    return typeof window !== "undefined" && window.matchMedia("(max-width: 1023px)").matches;
+  }
+
   function toggleSidebar() {
+    if (isMobileViewport()) {
+      setMobileSidebarOpen((current) => !current);
+      return;
+    }
     setSidebarCollapsed((current) => !current);
+  }
+
+  function closeMobileSidebar() {
+    setMobileSidebarOpen(false);
   }
 
   const workshopName = workshopProfile?.display_name || workshopProfile?.trade_name || workshopProfile?.legal_name || "Oficina Admin";
@@ -183,7 +201,8 @@ export default function Layout() {
   const contentClassName = "py-4 px-4 content-full-width";
 
   return (
-    <div className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${isKanbanRoute ? "kanban-shell" : ""}`.trim()}>
+    <div className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${mobileSidebarOpen ? "sidebar-mobile-open" : ""} ${isKanbanRoute ? "kanban-shell" : ""}`.trim()}>
+      <button type="button" className="sidebar-mobile-overlay" aria-label="Fechar menu" onClick={closeMobileSidebar} />
       <aside className="sidebar" aria-label="Menu lateral principal">
         <div className="sidebar-inner">
           <div className="sidebar-brand">
@@ -285,6 +304,7 @@ export default function Layout() {
           </Container>
         </Navbar>
         <Container fluid className={contentClassName}><Outlet /></Container>
+        <BottomNavigation />
       </div>
     </div>
   );

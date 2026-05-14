@@ -89,7 +89,7 @@ npm run dev
 11. Acesse `Envio manual` e confirme que o formulário está organizado por abas.
 12. Acesse `Automações` e crie/edite uma automação para confirmar as abas.
 13. Acesse `Notificações automáticas de OS` e crie/edite uma regra para confirmar as abas no modal.
-14. Acesse `Configurações administrativas` e confirme que os avisos inline não usam mais `alert alert-*` padrão do Bootstrap.
+14. Acesse `Configurações administrativas` e confirme que os avisos inline não usam mais `alert alert-*` padrão legado.
 15. Execute uma ação com sucesso em configurações e confirme que a mensagem aparece como toast no canto superior direito.
 
 ## Observações técnicas

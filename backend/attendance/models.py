@@ -181,15 +181,13 @@ class Estimate(TimeStampedModel):
         FULL = 100, "100%"
 
     class Status(models.TextChoices):
-        OPEN = "open", "Aberto"
-        DIAGNOSIS = "diagnosis", "Em diagnostico"
-        AWAITING_APPROVAL = "awaiting_approval", "Aguardando aprovacao"
+        DRAFT = "draft", "Rascunho"
+        SENT = "sent", "Enviado"
         APPROVED = "approved", "Aprovado"
-        PARTIALLY_APPROVED = "partially_approved", "Aprovado parcialmente"
-        REJECTED = "rejected", "Rejeitado"
+        REJECTED = "rejected", "Recusado"
         EXPIRED = "expired", "Expirado"
-        CONVERTED = "converted", "Convertido em OS"
         CANCELLED = "cancelled", "Cancelado"
+        CONVERTED = "converted", "Convertido em OS"
 
     number = models.CharField(max_length=30, unique=True, blank=True)
     customer = models.ForeignKey(Contact, on_delete=models.PROTECT, related_name="estimates")
@@ -199,7 +197,7 @@ class Estimate(TimeStampedModel):
     diagnosis = models.TextField(blank=True)
     internal_notes = models.TextField(blank=True)
     customer_notes = models.TextField(blank=True)
-    status = models.CharField(max_length=30, choices=Status.choices, default=Status.OPEN, db_index=True)
+    status = models.CharField(max_length=30, choices=Status.choices, default=Status.DRAFT, db_index=True)
     valid_until = models.DateField(null=True, blank=True, db_index=True)
     tank_level_percent = models.PositiveSmallIntegerField(choices=TankLevel.choices, default=TankLevel.EMPTY)
     sent_at = models.DateTimeField(null=True, blank=True)
@@ -208,6 +206,9 @@ class Estimate(TimeStampedModel):
     converted_at = models.DateTimeField(null=True, blank=True)
     cancelled_at = models.DateTimeField(null=True, blank=True)
     cancellation_reason = models.TextField(blank=True)
+    rejection_reason = models.TextField(blank=True)
+    approved_by = models.CharField(max_length=180, blank=True)
+    approval_method = models.CharField(max_length=40, blank=True)
     cancelled_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="cancelled_estimates")
     converted_work_order = models.OneToOneField(WorkOrder, null=True, blank=True, on_delete=models.SET_NULL, related_name="source_estimate")
     revision_work_order = models.ForeignKey(WorkOrder, null=True, blank=True, on_delete=models.SET_NULL, related_name="revision_estimates")
@@ -228,6 +229,50 @@ class Estimate(TimeStampedModel):
     @property
     def status_label(self):
         return self.get_status_display()
+
+    @property
+    def data_criacao(self):
+        return self.created_at
+
+    @property
+    def data_envio(self):
+        return self.sent_at
+
+    @property
+    def data_validade(self):
+        return self.valid_until
+
+    @property
+    def data_aprovacao(self):
+        return self.approved_at
+
+    @property
+    def data_cancelamento(self):
+        return self.cancelled_at
+
+    @property
+    def motivo_cancelamento(self):
+        return self.cancellation_reason
+
+    @property
+    def motivo_recusa(self):
+        return self.rejection_reason
+
+    @property
+    def forma_aprovacao(self):
+        return self.approval_method
+
+    @property
+    def valor_total(self):
+        return self.total_amount
+
+    @property
+    def observacoes(self):
+        return self.customer_notes
+
+    @property
+    def ordem_servico_id(self):
+        return self.converted_work_order_id
 
     @property
     def tank_level_label(self):
@@ -269,6 +314,26 @@ class Estimate(TimeStampedModel):
         return self.number or f"Orçamento #{self.pk}"
 
 
+class EstimateStatusHistory(TimeStampedModel):
+    """Histórico auditável de transições de status do orçamento."""
+
+    estimate = models.ForeignKey(Estimate, on_delete=models.CASCADE, related_name="status_history")
+    old_status = models.CharField(max_length=30, blank=True)
+    new_status = models.CharField(max_length=30)
+    description = models.TextField(blank=True)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="estimate_status_history")
+    data = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        indexes = [models.Index(fields=["estimate", "new_status"], name="est_hist_status_idx")]
+        verbose_name = "histórico de status do orçamento"
+        verbose_name_plural = "histórico de status dos orçamentos"
+
+    def __str__(self):
+        return f"{self.estimate.number} - {self.old_status or 'novo'} -> {self.new_status}"
+
+
 class EstimateServiceItem(TimeStampedModel):
     estimate = models.ForeignKey(Estimate, on_delete=models.CASCADE, related_name="services")
     service = models.ForeignKey(WorkshopService, null=True, blank=True, on_delete=models.SET_NULL, related_name="estimate_items")
@@ -295,8 +360,8 @@ class EstimateServiceItem(TimeStampedModel):
 
     def save(self, *args, **kwargs):
         is_new = self.pk is None
-        if self.estimate_id and self.estimate.status not in {Estimate.Status.OPEN, Estimate.Status.REJECTED}:
-            raise ValidationError("Itens só podem ser alterados em orçamento aberto ou recusado.")
+        if self.estimate_id and self.estimate.status != Estimate.Status.DRAFT:
+            raise ValidationError("Itens só podem ser alterados em orçamento rascunho.")
         if self.service:
             if not self.description:
                 self.description = self.service.name
@@ -331,7 +396,7 @@ class EstimateServiceItem(TimeStampedModel):
         return created
 
     def delete(self, *args, **kwargs):
-        if self.estimate.status not in {Estimate.Status.OPEN, Estimate.Status.REJECTED}:
+        if self.estimate.status != Estimate.Status.DRAFT:
             raise ValidationError("Itens só podem ser excluídos em orçamento aberto ou recusado.")
         estimate = self.estimate
         result = super().delete(*args, **kwargs)
@@ -368,8 +433,8 @@ class EstimatePartItem(TimeStampedModel):
         return total if total > ZERO else ZERO
 
     def save(self, *args, **kwargs):
-        if self.estimate_id and self.estimate.status not in {Estimate.Status.OPEN, Estimate.Status.REJECTED}:
-            raise ValidationError("Itens só podem ser alterados em orçamento aberto ou recusado.")
+        if self.estimate_id and self.estimate.status != Estimate.Status.DRAFT:
+            raise ValidationError("Itens só podem ser alterados em orçamento rascunho.")
         if self.part:
             if not self.description:
                 self.description = self.part.name
@@ -381,7 +446,7 @@ class EstimatePartItem(TimeStampedModel):
         self.estimate.recalculate_totals()
 
     def delete(self, *args, **kwargs):
-        if self.estimate.status not in {Estimate.Status.OPEN, Estimate.Status.REJECTED}:
+        if self.estimate.status != Estimate.Status.DRAFT:
             raise ValidationError("Itens só podem ser excluídos em orçamento aberto ou recusado.")
         estimate = self.estimate
         result = super().delete(*args, **kwargs)

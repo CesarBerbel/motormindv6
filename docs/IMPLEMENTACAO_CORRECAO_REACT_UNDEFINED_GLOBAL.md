@@ -52,7 +52,7 @@ Agora começa com:
 
 ```jsx
 import React, { useEffect, useState } from "react";
-import { Button, Modal } from "react-bootstrap";
+import { Button, Modal } from "../ui/TailwindPrimitives.jsx";
 ```
 
 ## Banco de dados

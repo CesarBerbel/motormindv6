@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Badge, Button, Card, Col, Form, Row, Table } from "react-bootstrap";
+import { Badge, Button, Card, Col, Form, Row, Table } from "../ui/TailwindPrimitives.jsx";
 import DateInput from "../components/DateInput";
 import { Link } from "react-router-dom";
 import api, { apiError } from "../api/client";
@@ -25,7 +25,7 @@ async function downloadCsv(endpoint, params, filename) {
   window.URL.revokeObjectURL(url);
 }
 
-const statusVariant = { open: "secondary", diagnosis: "info", awaiting_approval: "warning", approved: "success", partially_approved: "success", rejected: "danger", expired: "warning", converted: "primary", cancelled: "dark" };
+const statusVariant = { draft: "secondary", sent: "warning", approved: "success", rejected: "danger", expired: "warning", converted: "primary", cancelled: "dark" };
 
 export default function ReportsEstimatesPage() {
   const [filters, setFilters] = useState({ start_date: firstDay(), end_date: dateInputValue(), status: "", search: "" });

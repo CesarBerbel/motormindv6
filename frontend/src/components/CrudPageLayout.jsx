@@ -1,5 +1,5 @@
 import React from "react";
-import { Card } from "react-bootstrap";
+import { Card } from "../ui/TailwindPrimitives.jsx";
 import PageHeader from "./PageHeader";
 
 export default function CrudPageLayout({ title, subtitle, actions, filters, children, className = "" }) {

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Button, Card, Col, Form, Modal, Row } from "react-bootstrap";
+import { Button, Card, Col, Form, Modal, Row } from "../ui/TailwindPrimitives.jsx";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { sanitizeRichHtml } from "../utils/sanitizeHtml";
 import api, { apiError } from "../api/client";

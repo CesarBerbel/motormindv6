@@ -1,5 +1,5 @@
 import React from "react";
-import { Button } from "react-bootstrap";
+import { Button } from "../ui/TailwindPrimitives.jsx";
 
 export default function FormActions({ onCancel, cancelLabel = "Cancelar", submitLabel = "Salvar", loading = false, children }) {
   return (

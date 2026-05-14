@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Form, Spinner } from "react-bootstrap";
+import { Form, Spinner } from "../ui/TailwindPrimitives.jsx";
 
 export default function AutocompleteInput({
   id,

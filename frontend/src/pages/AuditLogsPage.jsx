@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Badge, Button, Card, Col, Form, Row, Table } from "react-bootstrap";
+import { Badge, Button, Card, Col, Form, Row, Table } from "../ui/TailwindPrimitives.jsx";
 import DateInput from "../components/DateInput";
 import api, { apiError, results } from "../api/client";
 import ErrorAlert from "../components/ErrorAlert";

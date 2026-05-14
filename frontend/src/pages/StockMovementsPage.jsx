@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Card, Table } from "react-bootstrap";
+import { Card, Table } from "../ui/TailwindPrimitives.jsx";
 import api, { apiError, results } from "../api/client";
 import AreaTabs from "../components/AreaTabs";
 import EmptyState from "../components/EmptyState";

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Badge, Button, ButtonGroup, Card, Col, Form, Row, Spinner } from "react-bootstrap";
+import { Badge, Button, ButtonGroup, Card, Col, Form, Row, Spinner } from "../ui/TailwindPrimitives.jsx";
 import { Link, useLocation } from "react-router-dom";
 import api, { apiError, results } from "../api/client";
 import AreaTabs from "../components/AreaTabs";
@@ -12,8 +12,8 @@ import StatusBadge from "../components/StatusBadge";
 import { money, priorities } from "../workshopOptions";
 import { buildReturnToState } from "../utils/returnTo";
 
-const OS_FINAL_STATUSES = new Set(["completed"]);
-const ESTIMATE_FINAL_STATUSES = new Set(["approved", "partially_approved", "rejected", "expired", "converted", "cancelled"]);
+const OS_FINAL_STATUSES = new Set(["delivered", "cancelled"]);
+const ESTIMATE_FINAL_STATUSES = new Set(["approved", "rejected", "expired", "converted", "cancelled"]);
 const VIEW_MODES = [
   ["day", "Dia"],
   ["week", "Semana"],
@@ -22,10 +22,12 @@ const VIEW_MODES = [
 const WEEKDAY_LABELS = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
 const STATUS_FILTER_OPTIONS = [
   { value: "open", label: "Aberta" },
-  { value: "in_progress", label: "Diagnóstico / execução" },
+  { value: "in_progress", label: "Em execução" },
   { value: "awaiting_approval", label: "Aguardando aprovação" },
   { value: "waiting_parts", label: "Aguardando peças" },
-  { value: "completed", label: "Concluída / finalizada" },
+  { value: "completed", label: "Concluída" },
+  { value: "delivered", label: "Entregue" },
+  { value: "cancelled", label: "Cancelada" },
 ];
 
 async function fetchAll(endpoint, params = {}) {
@@ -57,8 +59,7 @@ function itemRoute(item) {
 
 function visualStatus(item) {
   if (kindOf(item) !== "estimate") return item.status;
-  if (item.status === "diagnosis") return "in_progress";
-  if (item.status === "awaiting_approval") return "awaiting_approval";
+  if (item.status === "sent") return "awaiting_approval";
   if (ESTIMATE_FINAL_STATUSES.has(item.status)) return "completed";
   return "open";
 }

@@ -2,7 +2,7 @@ import React, { Suspense, lazy } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "./auth/AuthContext";
 import { defaultDashboardPath, hasPermission } from "./auth/permissions";
-import { Modal } from "react-bootstrap";
+import { Modal } from "./ui/TailwindPrimitives.jsx";
 import { resolveReturnTo } from "./utils/returnTo";
 
 const Layout = lazy(() => import("./components/Layout"));

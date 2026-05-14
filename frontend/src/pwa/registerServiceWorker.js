@@ -1,0 +1,10 @@
+export function registerServiceWorker() {
+  if (import.meta.env.DEV) return;
+  if (!("serviceWorker" in navigator)) return;
+
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch((error) => {
+      console.info("Service worker não registrado:", error);
+    });
+  });
+}

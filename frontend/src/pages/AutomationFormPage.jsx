@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Button, Card, Col, Form, Row } from "react-bootstrap";
+import { Button, Card, Col, Form, Row } from "../ui/TailwindPrimitives.jsx";
 import IntegerInput from "../components/IntegerInput";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import api, { apiError, results } from "../api/client";

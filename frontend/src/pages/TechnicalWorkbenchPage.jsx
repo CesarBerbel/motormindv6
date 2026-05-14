@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Alert, Badge, Button, Card, Col, Form, Modal, Row, Spinner } from "react-bootstrap";
+import { Alert, Badge, Button, Card, Col, Form, Modal, Row, Spinner } from "../ui/TailwindPrimitives.jsx";
 import { Link } from "react-router-dom";
 import api, { apiError, apiUrl } from "../api/client";
 import ErrorAlert from "../components/ErrorAlert";
@@ -17,8 +17,7 @@ function itemRoute(item) { return kindOf(item) === "estimate" ? `/attendance/est
 function itemPdfPath(item) { return kindOf(item) === "estimate" ? `/attendance/estimates/${item.id}/document/` : `/workshop/work-orders/${item.id}/document/`; }
 function actionLabel(action, status, kind = "os") {
   if (kind === "estimate") {
-    if (action === "start_diagnosis") return "Iniciar diagnóstico";
-    if (action === "send_approval") return "Aguardar aprovação";
+    if (action === "send_approval") return "Enviar aprovação";
     return "Mover orçamento";
   }
   if (action === "start") return status === "waiting_parts" ? "Retomar execução" : "Iniciar execução";
@@ -28,9 +27,9 @@ function actionLabel(action, status, kind = "os") {
 }
 function nextActionHint(item) {
   if (kindOf(item) === "estimate") {
-    if (item.status === "open") return "Orçamento aberto: iniciar diagnóstico técnico.";
-    if (item.status === "diagnosis") return "Diagnóstico pronto: enviar para aguardando aprovação.";
-    if (item.status === "awaiting_approval") return "Aguardando aprovação integral ou parcial do cliente. Ao aprovar, uma OS será aberta.";
+    if (item.status === "draft") return "Rascunho: envie para aprovação do cliente.";
+    if (item.status === "sent") return "Aguardando aprovação do cliente. Ao aprovar, uma OS será aberta.";
+    if (item.status === "approved") return "Aprovado: pode ser convertido em OS.";
     return "";
   }
   if (item.status === "open") return "Iniciar leva para Em execução";
@@ -39,8 +38,8 @@ function nextActionHint(item) {
   return "";
 }
 function canMoveItem(item) {
-  if (kindOf(item) === "estimate") return ["open", "diagnosis"].includes(item.status);
-  return ["open", "waiting_parts", "in_progress"].includes(item.status);
+  if (kindOf(item) === "estimate") return item.status === "draft";
+  return ["open", "waiting_parts", "in_progress", "awaiting_approval", "paused"].includes(item.status);
 }
 
 function WorkbenchCard({ item, columnKey, busyId, draggingId, onDragStart, onDragEnd, onAction }) {
@@ -48,11 +47,10 @@ function WorkbenchCard({ item, columnKey, busyId, draggingId, onDragStart, onDra
   const busy = busyId === itemKey(item);
   const isEstimate = kind === "estimate";
   const canDrag = canMoveItem(item);
-  const canStart = !isEstimate && ["open", "waiting_parts"].includes(item.status);
-  const canComplete = !isEstimate && ["in_progress", "waiting_parts"].includes(item.status);
-  const canWaitParts = !isEstimate && ["open", "in_progress"].includes(item.status);
-  const canStartDiagnosis = isEstimate && item.status === "open";
-  const canSendApproval = isEstimate && ["open", "diagnosis"].includes(item.status);
+  const canStart = !isEstimate && ["open", "waiting_parts", "awaiting_approval", "paused"].includes(item.status);
+  const canComplete = !isEstimate && ["in_progress", "awaiting_approval"].includes(item.status);
+  const canWaitParts = !isEstimate && ["open", "in_progress", "paused"].includes(item.status);
+  const canSendApproval = isEstimate && ["draft", "sent"].includes(item.status);
   return (
     <Card className={`kanban-card technical-service-card ${isEstimate ? "technical-card-estimate" : "technical-card-os"} ${String(draggingId) === itemKey(item) ? "kanban-card-dragging" : ""}`} draggable={canDrag && !busy} onDragStart={(event) => canDrag ? onDragStart(event, item) : event.preventDefault()} onDragEnd={onDragEnd}>
       <Card.Body>
@@ -78,7 +76,6 @@ function WorkbenchCard({ item, columnKey, busyId, draggingId, onDragStart, onDra
           {canWaitParts && columnKey !== "waiting_parts" ? <Button disabled={busy} size="sm" variant="outline-warning" onClick={() => onAction(item, "wait_parts")}>Aguardar peça</Button> : null}
           {canStart ? <Button disabled={busy} size="sm" onClick={() => onAction(item, "start")}>{actionLabel("start", item.status, kind)}</Button> : null}
           {canComplete ? <Button disabled={busy} size="sm" variant="success" onClick={() => onAction(item, "complete")}>{actionLabel("complete", item.status, kind)}</Button> : null}
-          {canStartDiagnosis ? <Button disabled={busy} size="sm" variant="info" onClick={() => onAction(item, "start_diagnosis")}>Iniciar diagnóstico</Button> : null}
           {canSendApproval ? <Button disabled={busy} size="sm" variant="warning" onClick={() => onAction(item, "send_approval")}>Aguardar aprovação</Button> : null}
         </div>
       </Card.Body>
@@ -137,12 +134,9 @@ export default function TechnicalWorkbenchPage() {
     setBusyId(itemKey(item)); setError(""); setNotice("");
     try {
       if (kindOf(item) === "estimate") {
-        if (action === "start_diagnosis") {
-          const response = await api.post(`/attendance/estimates/${item.id}/change-status/`, { status: "diagnosis", note: "Orçamento movido para diagnóstico pela Bancada Técnica." });
-          setNotice(`${item.number} atualizado para ${response.data?.status_label || "diagnóstico"}.`);
-        } else if (action === "send_approval") {
+        if (action === "send_approval") {
           const response = await api.post(`/attendance/estimates/${item.id}/create-customer-approval/`, {});
-          setNotice(`${item.number} enviado para aguardando aprovação.${response.data?.public_url ? " Link público gerado." : ""}`);
+          setNotice(`${item.number} enviado para aprovação.${response.data?.public_url ? " Link público gerado." : ""}`);
         } else { throw new Error("Ação inválida para orçamento."); }
       } else {
         const response = await api.post(`/workshop/work-orders/${item.id}/technical-action/`, { action, note: `${actionLabel(action, item.status, "os")} pela Bancada Técnica.`, ...extraPayload });
@@ -161,13 +155,12 @@ export default function TechnicalWorkbenchPage() {
   function actionForDrop(item, columnKey) {
     if (!item) return "";
     if (kindOf(item) === "estimate") {
-      if (columnKey === "active" && item.status === "open") return "start_diagnosis";
-      if (columnKey === "approval" && ["open", "diagnosis"].includes(item.status)) return "send_approval";
+      if (columnKey === "approval" && item.status === "draft") return "send_approval";
       return "";
     }
-    if (columnKey === "active") return ["open", "waiting_parts"].includes(item.status) ? "start" : "";
-    if (columnKey === "waiting_parts") return ["open", "in_progress"].includes(item.status) ? "wait_parts" : "";
-    if (columnKey === "done") return ["in_progress", "waiting_parts"].includes(item.status) ? "complete" : "";
+    if (columnKey === "active") return ["open", "waiting_parts", "awaiting_approval", "paused"].includes(item.status) ? "start" : "";
+    if (columnKey === "waiting_parts") return ["open", "in_progress", "paused"].includes(item.status) ? "wait_parts" : "";
+    if (columnKey === "done") return ["in_progress", "awaiting_approval"].includes(item.status) ? "complete" : "";
     return "";
   }
   function onDragStart(event, item) { const key = itemKey(item); setDraggingId(key); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", key); }

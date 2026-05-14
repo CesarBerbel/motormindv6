@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Button, Card, Col, Form, Modal, Row, Table } from "react-bootstrap";
+import { Button, Card, Col, Form, Modal, Row, Table } from "../ui/TailwindPrimitives.jsx";
 import api, { apiError, results } from "../api/client";
 import EmptyState from "../components/EmptyState";
 import ErrorAlert from "../components/ErrorAlert";
@@ -195,7 +195,7 @@ export default function NotificationRulesPage() {
               <Col md={4}>
                 <Form.Group>
                   <Form.Label>Documento</Form.Label>
-                  <Form.Select value={form.entity_type || "work_order"} onChange={(event) => update({ entity_type: event.target.value, trigger_status: event.target.value === "estimate" ? "open" : "open" })}>
+                  <Form.Select value={form.entity_type || "work_order"} onChange={(event) => update({ entity_type: event.target.value, trigger_status: event.target.value === "estimate" ? "draft" : "open" })}>
                     <option value="work_order">Ordem de serviço</option>
                     <option value="estimate">Orçamento</option>
                   </Form.Select>

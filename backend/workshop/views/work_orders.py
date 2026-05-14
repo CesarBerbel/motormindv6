@@ -1,6 +1,6 @@
 from .common import *
 
-WORK_ORDER_AUDIT_FIELDS = ["number", "status", "priority", "manual_discount_amount", "discount_total", "grand_total", "paid_total", "balance_due", "mileage_in", "mileage_out", "promised_at", "assigned_to_id"]
+WORK_ORDER_AUDIT_FIELDS = ["number", "status", "financial_status", "priority", "manual_discount_amount", "discount_total", "grand_total", "paid_total", "balance_due", "mileage_in", "mileage_out", "promised_at", "assigned_to_id"]
 WORK_ORDER_SERVICE_AUDIT_FIELDS = ["description", "quantity", "unit_price", "discount_amount", "status", "technician_id", "notes", "technical_diagnosis", "execution_notes"]
 WORK_ORDER_PART_AUDIT_FIELDS = ["description", "quantity", "unit_price", "cost_price", "discount_amount", "consume_inventory", "notes"]
 WORK_ORDER_PAYMENT_AUDIT_FIELDS = ["method", "amount", "paid_at", "reference", "notes", "reversed_at", "reversal_reason"]
@@ -312,10 +312,17 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
                 "signed_at": timezone.now(),
             },
         )
-        if work_order.status != WorkOrder.Status.COMPLETED:
-            work_order.status = WorkOrder.Status.COMPLETED
-            work_order.delivered_at = timezone.now()
-            work_order.save(update_fields=["status", "delivered_at", "updated_at"])
+        if work_order.status != WorkOrder.Status.DELIVERED:
+            try:
+                work_order, _message_ids = change_work_order_status(
+                    work_order,
+                    WorkOrder.Status.DELIVERED,
+                    actor=request.user,
+                    note=serializer.validated_data.get("notes", "") or f"Entrega assinada por {signature.recipient_name}.",
+                    send_notifications=True,
+                )
+            except DjangoValidationError as exc:
+                raise drf_validation_from_django(exc) from exc
         record_event(
             work_order,
             WorkOrderEvent.EventType.DELIVERY_SIGNED,

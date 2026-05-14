@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Button, Card, Col, Form, Modal, Row, Table } from "react-bootstrap";
+import { Button, Card, Col, Form, Modal, Row, Table } from "../ui/TailwindPrimitives.jsx";
 import { sanitizeRichHtml } from "../utils/sanitizeHtml";
 import api, { apiError, results } from "../api/client";
 import PageHeader from "../components/PageHeader";

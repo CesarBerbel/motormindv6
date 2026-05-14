@@ -1,5 +1,5 @@
 import React from "react";
-import { Form } from "react-bootstrap";
+import { Form } from "../ui/TailwindPrimitives.jsx";
 
 function isDecimalMode(step) {
   if (step === "any") return true;

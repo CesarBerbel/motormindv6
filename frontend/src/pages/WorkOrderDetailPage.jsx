@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Button, Card, Col, Form, Modal, Row, Table } from "react-bootstrap";
+import { Alert, Button, Card, Col, Form, Modal, Row, Table } from "../ui/TailwindPrimitives.jsx";
+import PhotoCaptureInput from "../components/PhotoCaptureInput";
 import IntegerInput from "../components/IntegerInput";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import api, { apiError, results } from "../api/client";
@@ -693,7 +694,13 @@ export default function WorkOrderDetailPage() {
                             <Form.Control as="textarea" rows={2} value={item.note || ""} placeholder="Observação técnica" onChange={(event) => setChecklistItems((current) => current.map((row) => row.id === item.id ? { ...row, note: event.target.value } : row))} onBlur={(event) => updateChecklistItem(item, { note: event.target.value })} />
                           </Col>
                           <Col md={4}>
-                            <Form.Control type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => event.target.files?.[0] && updateChecklistItem(item, { photo: event.target.files[0] })} />
+                            <PhotoCaptureInput
+                              id={`checklist-photo-${item.id}`}
+                              cameraLabel="Tirar foto"
+                              galleryLabel="Escolher foto"
+                              onFileChange={(file) => file && updateChecklistItem(item, { photo: file })}
+                              helpText="Use a câmera do celular para registrar a evidência do checklist."
+                            />
                             {item.photo_url ? <a className="small d-inline-block mt-1" href={item.photo_url} target="_blank" rel="noreferrer">Ver foto anexada</a> : null}
                           </Col>
                         </Row>
@@ -933,8 +940,15 @@ export default function WorkOrderDetailPage() {
             </Col>
             <Col md={8}>
               <Form.Label>Fotos</Form.Label>
-              <Form.Control type="file" multiple accept="image/png,image/jpeg,image/webp" onChange={(e) => setPhotoForm({ ...photoForm, files: Array.from(e.target.files || []) })} />
-              <Form.Text>As fotos serão gravadas com data/hora e usuário responsável. O hash permanece salvo internamente para auditoria, mas não aparece na tela da OS.</Form.Text>
+              <PhotoCaptureInput
+                id="work-order-photos"
+                multiple
+                cameraLabel="Tirar foto da OS"
+                galleryLabel="Escolher fotos"
+                onFilesChange={(files) => setPhotoForm((current) => ({ ...current, files: [...current.files, ...files] }))}
+                summary={photoForm.files.length ? `${photoForm.files.length} foto${photoForm.files.length === 1 ? "" : "s"} selecionada${photoForm.files.length === 1 ? "" : "s"}` : "Nenhuma foto selecionada"}
+                helpText="No celular, toque em Tirar foto da OS para abrir a câmera. As fotos serão gravadas com data/hora e usuário responsável; o hash permanece salvo internamente para auditoria."
+              />
             </Col>
             <Col md={12}>
               <Form.Label>Legenda / observação</Form.Label>

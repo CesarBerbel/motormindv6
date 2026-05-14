@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Button, Card, Form, Table } from "react-bootstrap";
+import { Button, Card, Form, Table } from "../ui/TailwindPrimitives.jsx";
 import { Link, useLocation } from "react-router-dom";
 import api, { apiError, results } from "../api/client";
 import PageHeader from "../components/PageHeader";

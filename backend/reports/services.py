@@ -317,10 +317,10 @@ def estimates_report(request):
     qs = apply_estimate_filters(request, qs)
     total_amount = money_sum(qs, "total_amount")
     count = qs.count()
-    approved_qs = qs.filter(status__in=[Estimate.Status.APPROVED, Estimate.Status.PARTIALLY_APPROVED])
+    approved_qs = qs.filter(status=Estimate.Status.APPROVED)
     converted_qs = qs.filter(status=Estimate.Status.CONVERTED)
     rejected_qs = qs.filter(status=Estimate.Status.REJECTED)
-    pending_qs = qs.filter(status=Estimate.Status.AWAITING_APPROVAL)
+    pending_qs = qs.filter(status=Estimate.Status.SENT)
 
     return {
         "period": build_period_meta(start_date, end_date),

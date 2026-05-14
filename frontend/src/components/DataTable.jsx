@@ -1,5 +1,5 @@
 import React from "react";
-import { Table } from "react-bootstrap";
+import { Table } from "../ui/TailwindPrimitives.jsx";
 import EmptyState from "./EmptyState";
 
 export default function DataTable({ columns, rows, rowKey = "id", emptyMessage = "Nenhum registro encontrado.", className = "" }) {

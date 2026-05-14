@@ -25,3 +25,17 @@ class WorkshopProfileView(APIView):
 
     def patch(self, request):
         return self.put(request)
+
+class BottomNavigationView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        items = BottomNavigationItem.objects.filter(is_active=True).order_by("position", "label")
+        visible_items = []
+        for item in items:
+            permission_codes = item.permission_codes
+            if not permission_codes or any(user_has_permission(request.user, code) for code in permission_codes):
+                visible_items.append(item)
+        serializer = BottomNavigationItemSerializer(visible_items, many=True, context={"request": request})
+        return Response(serializer.data)
+

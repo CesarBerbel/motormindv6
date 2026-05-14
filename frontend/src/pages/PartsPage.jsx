@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { Button, Card, Col, Form, Modal, Row, Table } from "react-bootstrap";
+import { Button, Card, Col, Form, Modal, Row, Table } from "../ui/TailwindPrimitives.jsx";
+import PhotoCaptureInput from "../components/PhotoCaptureInput";
 import IntegerInput from "../components/IntegerInput";
 import api, { apiError, results } from "../api/client";
 import AutocompleteInput from "../components/AutocompleteInput";
@@ -481,13 +482,13 @@ export default function PartsPage() {
                     </div>
                   </Col>
                   <Col md={7}>
-                    <Form.Label>Arquivo da foto</Form.Label>
-                    <Form.Control
-                      type="file"
-                      accept="image/png,image/jpeg,image/webp"
-                      onChange={(event) => { setPhotoFile(event.target.files?.[0] || null); setRemovePhoto(false); }}
+                    <Form.Label>Foto da peça</Form.Label>
+                    <PhotoCaptureInput
+                      id="part-photo"
+                      onFileChange={(file) => { setPhotoFile(file); setRemovePhoto(false); }}
+                      summary={photoFile ? photoFile.name : "Nenhuma foto selecionada"}
+                      helpText="No celular, toque em Tirar foto para abrir a câmera. Você também pode escolher uma imagem da galeria. Tamanho máximo validado no backend: 5 MB."
                     />
-                    <Form.Text>Use uma imagem nítida da peça para facilitar identificação no estoque e na OS. Tamanho máximo validado no backend: 5 MB.</Form.Text>
                     <div className="d-flex gap-2 mt-3">
                       <Button type="button" variant="outline-secondary" onClick={() => { setPhotoFile(null); setRemovePhoto(false); }}>Limpar seleção</Button>
                       {editing?.photo_url || photoFile ? <Button type="button" variant="outline-danger" onClick={() => { setPhotoFile(null); setRemovePhoto(true); }}>Remover foto</Button> : null}

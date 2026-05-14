@@ -28,6 +28,7 @@ from purchasing.models import PurchaseOrder
 from ..models import (
     GeneralCategory,
     WorkshopProfile,
+    BottomNavigationItem,
     PartBrand,
     normalize_lookup_name,
     Part,
@@ -55,6 +56,7 @@ from ..serializers import (
     CompleteWorkOrderServiceSerializer,
     GeneralCategorySerializer,
     WorkshopProfileSerializer,
+    BottomNavigationItemSerializer,
     PublicLandingSerializer,
     PartBrandSerializer,
     PartSerializer,

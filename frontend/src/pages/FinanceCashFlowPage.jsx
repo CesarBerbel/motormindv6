@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Button, Card, Col, Form, Row, Table } from "react-bootstrap";
+import { Button, Card, Col, Form, Row, Table } from "../ui/TailwindPrimitives.jsx";
 import DateInput from "../components/DateInput";
 import api, { apiError } from "../api/client";
 import EmptyState from "../components/EmptyState";

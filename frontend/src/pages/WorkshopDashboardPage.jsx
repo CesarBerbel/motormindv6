@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Card, Col, Row, Table } from "react-bootstrap";
+import { Card, Col, Row, Table } from "../ui/TailwindPrimitives.jsx";
 import { Link } from "react-router-dom";
 import api,{apiError} from "../api/client";
 import ErrorAlert from "../components/ErrorAlert";

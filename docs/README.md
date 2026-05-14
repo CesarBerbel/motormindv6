@@ -1,6 +1,6 @@
 # Sistema de Oficina Mecânica + Ordens de Serviço + Mensageria
 
-Projeto full stack com **Django + Django REST Framework + React + Bootstrap**, contendo uma área administrativa própria, separada do Django Admin. A versão atual une o sistema de mensagens criado anteriormente com um sistema completo de **ordens de serviço para oficina mecânica**.
+Projeto full stack com **Django + Django REST Framework + React + Tailwind CSS**, contendo uma área administrativa própria, separada do Django Admin. A versão atual une o sistema de mensagens criado anteriormente com um sistema completo de **ordens de serviço para oficina mecânica**.
 
 ## Módulos principais
 
@@ -371,3 +371,7 @@ Após atualizar o backend, execute:
 ```bash
 python manage.py migrate
 ```
+
+## Atualização Tailwind/PWA
+
+O frontend foi migrado para Tailwind CSS, sem dependências de Bootstrap, mantendo componentes reutilizáveis locais e layout mobile-first. A aplicação também inclui manifest, ícones e service worker para instalação como PWA.

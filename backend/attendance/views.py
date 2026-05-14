@@ -13,7 +13,7 @@ from workshop.documents import generate_estimate_pdf
 from workshop.serializers import PartSerializer, WorkOrderDetailSerializer, WorkOrderListSerializer
 from workshop.models import Part, WorkOrder
 
-from .models import CounterSale, Estimate, EstimateCustomerApproval
+from .models import CounterSale, Estimate, EstimateCustomerApproval, EstimateStatusHistory
 from .serializers import (
     CancelCounterSaleSerializer,
     CancelEstimateSerializer,
@@ -41,10 +41,22 @@ def get_client_ip(request):
 
 def expire_overdue_estimates():
     today = timezone.localdate()
-    return Estimate.objects.filter(
+    overdue_estimates = list(Estimate.objects.filter(
         valid_until__lt=today,
-        status__in=[Estimate.Status.OPEN, Estimate.Status.DIAGNOSIS, Estimate.Status.AWAITING_APPROVAL],
-    ).update(status=Estimate.Status.EXPIRED)
+        status__in=[Estimate.Status.SENT],
+    ))
+    for estimate in overdue_estimates:
+        old_status = estimate.status
+        estimate.status = Estimate.Status.EXPIRED
+        estimate.save(update_fields=["status", "updated_at"])
+        EstimateStatusHistory.objects.create(
+            estimate=estimate,
+            old_status=old_status,
+            new_status=estimate.status,
+            description="Orçamento expirado automaticamente pela data de validade.",
+            data={"valid_until": estimate.valid_until.isoformat() if estimate.valid_until else None},
+        )
+    return len(overdue_estimates)
 
 
 def build_estimate_approval_public_url(request, approval, frontend_base_url=""):
@@ -66,7 +78,7 @@ class AttendanceDashboardView(APIView):
         today = timezone.localdate()
         month_start = today.replace(day=1)
         open_work_order_statuses = [WorkOrder.Status.OPEN, WorkOrder.Status.WAITING_PARTS, WorkOrder.Status.IN_PROGRESS]
-        estimate_open_statuses = [Estimate.Status.OPEN, Estimate.Status.DIAGNOSIS, Estimate.Status.AWAITING_APPROVAL]
+        estimate_open_statuses = [Estimate.Status.DRAFT, Estimate.Status.SENT]
         sales = CounterSale.objects.select_related("customer").all()
         estimates = Estimate.objects.select_related("customer", "vehicle", "converted_work_order", "revision_work_order").all()
         finalized_sales = sales.filter(status=CounterSale.Status.FINALIZED)
@@ -75,11 +87,11 @@ class AttendanceDashboardView(APIView):
         return Response({
             "counts": {
                 "open_work_orders": WorkOrder.objects.filter(status__in=open_work_order_statuses).count(),
-                "awaiting_approval_work_orders": estimates.filter(status=Estimate.Status.AWAITING_APPROVAL).count(),
+                "awaiting_approval_work_orders": estimates.filter(status=Estimate.Status.SENT).count(),
                 "ready_work_orders": WorkOrder.objects.filter(status=WorkOrder.Status.COMPLETED).count(),
                 "estimates_open": estimates.filter(status__in=estimate_open_statuses).count(),
-                "estimates_sent": estimates.filter(status=Estimate.Status.AWAITING_APPROVAL).count(),
-                "estimates_approved_month": estimates.filter(status__in=[Estimate.Status.APPROVED, Estimate.Status.PARTIALLY_APPROVED, Estimate.Status.CONVERTED], approved_at__date__gte=month_start).count(),
+                "estimates_sent": estimates.filter(status=Estimate.Status.SENT).count(),
+                "estimates_approved_month": estimates.filter(status__in=[Estimate.Status.APPROVED, Estimate.Status.CONVERTED], approved_at__date__gte=month_start).count(),
                 "counter_sales_today": finalized_sales.filter(sold_at__date=today).count(),
                 "counter_sales_month_amount": sales_month["total"] or 0,
                 "counter_sales_month_paid": sales_month["paid"] or 0,

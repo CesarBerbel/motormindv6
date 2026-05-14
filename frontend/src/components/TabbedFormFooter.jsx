@@ -1,5 +1,5 @@
 import React from "react";
-import { Button, Modal } from "react-bootstrap";
+import { Button, Modal } from "../ui/TailwindPrimitives.jsx";
 
 function currentIndex(tabs, activeKey) {
   return Math.max(0, tabs.findIndex((tab) => tab.key === activeKey));

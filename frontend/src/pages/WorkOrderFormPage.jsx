@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Alert, Button, Card, Col, Form, Row, Table } from "react-bootstrap";
+import { Alert, Button, Card, Col, Form, Row, Table } from "../ui/TailwindPrimitives.jsx";
+import PhotoCaptureInput from "../components/PhotoCaptureInput";
 import IntegerInput from "../components/IntegerInput";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import api, { apiError, results } from "../api/client";
@@ -451,10 +452,6 @@ export default function WorkOrderFormPage({ embedded = false, returnTo }) {
     ]);
   }
 
-  function onOpeningPhotoInputChange(event) {
-    addOpeningPhotos(event.target.files);
-    event.target.value = "";
-  }
 
   function clearOpeningPhotos() {
     setOpeningPhotos([]);
@@ -676,22 +673,16 @@ export default function WorkOrderFormPage({ embedded = false, returnTo }) {
                       <Form.Control value={photoCaption} onChange={(event) => setPhotoCaption(event.target.value)} placeholder="Ex.: Lateral direita na entrada" />
                     </Col>
                     <Col lg={4}>
-                      <Form.Label>Selecionar fotos</Form.Label>
-                      <div className="protection-file-picker">
-                        <input
-                          id="openingPhotosInput"
-                          className="visually-hidden"
-                          type="file"
-                          multiple
-                          accept="image/png,image/jpeg,image/webp"
-                          onChange={onOpeningPhotoInputChange}
-                        />
-                        <Button as="label" htmlFor="openingPhotosInput" type="button" variant="outline-primary" className="mb-0">
-                          Escolher fotos
-                        </Button>
-                        <span className="protection-file-summary" title={selectedOpeningPhotoSummary}>{selectedOpeningPhotoSummary}</span>
-                      </div>
-                      <Form.Text>Use fotos nítidas. Tamanho máximo por foto validado no backend: 8 MB.</Form.Text>
+                      <Form.Label>Fotos de entrada</Form.Label>
+                      <PhotoCaptureInput
+                        id="opening-photos"
+                        multiple
+                        cameraLabel="Tirar foto"
+                        galleryLabel="Escolher fotos"
+                        onFilesChange={(files) => addOpeningPhotos(files)}
+                        summary={selectedOpeningPhotoSummary}
+                        helpText="No celular, toque em Tirar foto para abrir a câmera. Fotografe exterior, interior, painel/hodômetro, rodas, pintura e avarias pré-existentes. Tamanho máximo por foto validado no backend: 8 MB."
+                      />
                     </Col>
                     <Col lg={2}>
                       <Button type="button" variant="outline-secondary" className="w-100" onClick={clearOpeningPhotos} disabled={!openingPhotos.length}>Limpar</Button>

@@ -6,7 +6,7 @@ Ao clicar em **Editar** na tela `Catálogo de serviços`, o frontend quebrava de
 
 ## Causa
 
-A aba **Peças padrão** renderizava o componente `<Alert />`, porém `Alert` não estava importado de `react-bootstrap` em `frontend/src/pages/WorkshopServicesPage.jsx`.
+A aba **Peças padrão** renderizava o componente `<Alert />`, porém `Alert` não estava importado de `../ui/TailwindPrimitives.jsx` em `frontend/src/pages/WorkshopServicesPage.jsx`.
 
 Mesmo que a aba inicial fosse outra, o componente da página podia ser avaliado durante a renderização do modal, disparando erro de runtime.
 
@@ -15,7 +15,7 @@ Mesmo que a aba inicial fosse outra, o componente da página podia ser avaliado 
 O import foi ajustado para incluir `Alert`:
 
 ```jsx
-import { Alert, Button, Card, Col, Form, Modal, Row, Table } from "react-bootstrap";
+import { Alert, Button, Card, Col, Form, Modal, Row, Table } from "../ui/TailwindPrimitives.jsx";
 ```
 
 ## Validação

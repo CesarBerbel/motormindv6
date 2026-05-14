@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Button, Card, Col, Form, Row, Table } from "react-bootstrap";
+import { Button, Card, Col, Form, Row, Table } from "../ui/TailwindPrimitives.jsx";
 import api, { apiError, results } from "../api/client";
 import ErrorAlert from "../components/ErrorAlert";
 import FormTabs, { TabPanel } from "../components/FormTabs";

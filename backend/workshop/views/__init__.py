@@ -18,7 +18,7 @@ from .catalog import (
     WorkshopServiceViewSet,
 )
 from .dashboards import RoleDashboardView, TechnicalDashboardView, WorkshopDashboardView
-from .profile import WorkshopProfileView
+from .profile import WorkshopProfileView, BottomNavigationView
 from .public import CustomerApprovalPdfView, CustomerApprovalPublicView, PublicLandingView
 from .vehicles import VehicleViewSet
 from .work_orders import (
@@ -51,6 +51,7 @@ __all__ = [
     "VehicleViewSet",
     "WorkshopDashboardView",
     "WorkshopProfileView",
+    "BottomNavigationView",
     "WorkshopServiceChecklistTemplateViewSet",
     "WorkshopServiceViewSet",
     "WorkOrderEventViewSet",

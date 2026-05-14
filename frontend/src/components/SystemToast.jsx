@@ -1,5 +1,5 @@
 import React from "react";
-import { Toast, ToastContainer } from "react-bootstrap";
+import { Toast, ToastContainer } from "../ui/TailwindPrimitives.jsx";
 
 const AUTO_HIDE_DELAYS = {
   success: 3000,

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Button, Card, Col, Form, Row, Table } from "react-bootstrap";
+import { Button, Card, Col, Form, Row, Table } from "../ui/TailwindPrimitives.jsx";
 import api, { apiError } from "../api/client";
 import { lookupCep } from "../utils/cep";
 import PageHeader from "../components/PageHeader";

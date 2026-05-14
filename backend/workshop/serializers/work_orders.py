@@ -5,7 +5,7 @@ from .vehicles import VehicleSerializer
 
 
 
-WORK_ORDER_DIRECT_EDIT_STATUSES = {WorkOrder.Status.OPEN, WorkOrder.Status.IN_PROGRESS, WorkOrder.Status.WAITING_PARTS}
+WORK_ORDER_DIRECT_EDIT_STATUSES = {WorkOrder.Status.OPEN, WorkOrder.Status.IN_PROGRESS, WorkOrder.Status.WAITING_PARTS, WorkOrder.Status.AWAITING_APPROVAL, WorkOrder.Status.PAUSED}
 
 
 def work_order_has_pending_approval(work_order):
@@ -38,7 +38,7 @@ def validate_work_order_direct_edit_allowed(work_order):
         return
     if work_order.status not in WORK_ORDER_DIRECT_EDIT_STATUSES:
         raise serializers.ValidationError({
-            "status": "A OS só pode ser alterada quando estiver aberta, em execução ou aguardando peças."
+            "status": "A OS só pode ser alterada quando estiver aberta, em execução, aguardando peças, aguardando aprovação ou pausada."
         })
     if work_order_has_pending_approval(work_order):
         raise serializers.ValidationError({
@@ -458,7 +458,7 @@ class WorkOrderNotificationRuleSerializer(serializers.ModelSerializer):
             if trigger_status not in valid_statuses:
                 raise serializers.ValidationError({"trigger_status": "Status gatilho inválido para ordem de serviço."})
         elif entity_type == WorkOrderNotificationRule.EntityType.ESTIMATE:
-            valid_statuses = {"open", "diagnosis", "awaiting_approval", "approved", "partially_approved", "rejected", "expired", "converted", "cancelled"}
+            valid_statuses = {"draft", "sent", "approved", "rejected", "expired", "converted", "cancelled"}
             if trigger_status not in valid_statuses:
                 raise serializers.ValidationError({"trigger_status": "Status gatilho inválido para orçamento."})
         return attrs
@@ -521,11 +521,29 @@ class WorkOrderSerializer(serializers.ModelSerializer):
     can_edit = serializers.SerializerMethodField()
     has_pending_approval = serializers.SerializerMethodField()
     requires_revision_estimate = serializers.SerializerMethodField()
+    cliente_id = serializers.IntegerField(source="customer_id", read_only=True)
+    veiculo_id = serializers.IntegerField(source="vehicle_id", read_only=True)
+    orcamento_id = serializers.IntegerField(read_only=True)
+    status_operacional = serializers.CharField(read_only=True)
+    status_financeiro = serializers.CharField(read_only=True)
+    data_abertura = serializers.DateTimeField(read_only=True)
+    data_inicio = serializers.DateTimeField(read_only=True)
+    data_conclusao = serializers.DateTimeField(read_only=True)
+    data_entrega = serializers.DateTimeField(read_only=True)
+    data_cancelamento = serializers.DateTimeField(read_only=True)
+    motivo_cancelamento = serializers.CharField(read_only=True)
+    km_entrada = serializers.IntegerField(read_only=True)
+    km_saida = serializers.IntegerField(read_only=True)
+    problema_relatado = serializers.CharField(read_only=True)
+    observacoes_cliente = serializers.CharField(read_only=True)
+    observacoes_internas = serializers.CharField(read_only=True)
+    valor_total = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    responsavel_id = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = WorkOrder
-        fields = ["id", "number", "customer", "customer_id", "customer_name", "vehicle", "vehicle_id", "vehicle_display", "title", "complaint", "diagnosis", "solution", "internal_notes", "customer_notes", "status", "status_label", "priority", "priority_label", "order_type", "order_type_label", "reference_work_order", "reference_work_order_id", "reference_work_order_number", "mileage_in", "mileage_out", "promised_at", "opened_at", "approved_at", "started_at", "completed_at", "delivered_at", "cancelled_at", "cancelled_by", "cancellation_reason", "assigned_to", "assigned_to_id", "assigned_to_name", "subtotal_services", "subtotal_parts", "manual_discount_amount", "discount_total", "grand_total", "paid_total", "balance_due", "inventory_consumed_at", "account_receivable_summary", "purchase_orders_summary", "available_status_transitions", "can_edit", "has_pending_approval", "requires_revision_estimate", "created_at", "updated_at", "initial_service_items"]
-        read_only_fields = ["id", "number", "customer", "customer_name", "vehicle", "vehicle_display", "assigned_to", "assigned_to_name", "reference_work_order", "reference_work_order_number", "status", "status_label", "priority_label", "order_type_label", "opened_at", "approved_at", "started_at", "completed_at", "delivered_at", "cancelled_at", "cancelled_by", "cancellation_reason", "subtotal_services", "subtotal_parts", "discount_total", "grand_total", "paid_total", "balance_due", "inventory_consumed_at", "account_receivable_summary", "purchase_orders_summary", "available_status_transitions", "can_edit", "has_pending_approval", "requires_revision_estimate", "created_at", "updated_at"]
+        fields = ["id", "number", "customer", "customer_id", "cliente_id", "customer_name", "vehicle", "vehicle_id", "veiculo_id", "vehicle_display", "title", "complaint", "problema_relatado", "diagnosis", "solution", "internal_notes", "observacoes_internas", "customer_notes", "observacoes_cliente", "status", "status_operacional", "status_label", "financial_status", "status_financeiro", "financial_status_label", "source_estimate_id", "orcamento_id", "source_estimate_number", "priority", "priority_label", "order_type", "order_type_label", "reference_work_order", "reference_work_order_id", "reference_work_order_number", "mileage_in", "km_entrada", "mileage_out", "km_saida", "promised_at", "opened_at", "data_abertura", "approved_at", "started_at", "data_inicio", "completed_at", "data_conclusao", "delivered_at", "data_entrega", "cancelled_at", "data_cancelamento", "cancelled_by", "cancellation_reason", "motivo_cancelamento", "assigned_to", "assigned_to_id", "responsavel_id", "assigned_to_name", "subtotal_services", "subtotal_parts", "manual_discount_amount", "discount_total", "grand_total", "valor_total", "paid_total", "balance_due", "inventory_consumed_at", "account_receivable_summary", "purchase_orders_summary", "available_status_transitions", "can_edit", "has_pending_approval", "requires_revision_estimate", "created_at", "updated_at", "initial_service_items"]
+        read_only_fields = ["id", "number", "customer", "cliente_id", "customer_name", "vehicle", "veiculo_id", "vehicle_display", "assigned_to", "responsavel_id", "assigned_to_name", "reference_work_order", "reference_work_order_number", "status", "status_operacional", "status_label", "financial_status", "status_financeiro", "financial_status_label", "source_estimate_id", "orcamento_id", "source_estimate_number", "priority_label", "order_type_label", "opened_at", "data_abertura", "approved_at", "started_at", "data_inicio", "completed_at", "data_conclusao", "delivered_at", "data_entrega", "cancelled_at", "data_cancelamento", "cancelled_by", "cancellation_reason", "motivo_cancelamento", "subtotal_services", "subtotal_parts", "discount_total", "grand_total", "valor_total", "paid_total", "balance_due", "inventory_consumed_at", "account_receivable_summary", "purchase_orders_summary", "available_status_transitions", "can_edit", "has_pending_approval", "requires_revision_estimate", "created_at", "updated_at"]
 
     def get_assigned_to_name(self, obj):
         return obj.assigned_to.get_full_name() or obj.assigned_to.username if obj.assigned_to else ""
@@ -607,17 +625,21 @@ class WorkOrderSerializer(serializers.ModelSerializer):
         vehicle = attrs.get("vehicle", getattr(self.instance, "vehicle", None))
         order_type = attrs.get("order_type", getattr(self.instance, "order_type", WorkOrder.OrderType.STANDARD))
         reference_work_order = attrs.get("reference_work_order", getattr(self.instance, "reference_work_order", None))
+        if not customer:
+            raise serializers.ValidationError({"customer_id": "Informe o cliente da OS."})
+        if not vehicle:
+            raise serializers.ValidationError({"vehicle_id": "Informe o veículo da OS."})
         if vehicle and customer and vehicle.customer_id != customer.id:
             raise serializers.ValidationError({"vehicle_id": "O veiculo informado pertence a outro cliente."})
         if self.instance is None and customer:
             from attendance.models import Estimate
             has_active_estimate = Estimate.objects.filter(
                 customer=customer,
-                status__in=[Estimate.Status.OPEN, Estimate.Status.DIAGNOSIS, Estimate.Status.AWAITING_APPROVAL],
+                status__in=[Estimate.Status.DRAFT, Estimate.Status.SENT],
             ).exists()
             if has_active_estimate:
                 raise serializers.ValidationError({
-                    "customer_id": "Este cliente já possui orçamento em andamento (aberto, em diagnóstico ou aguardando aprovação). Converta ou finalize o orçamento antes de abrir uma OS avulsa."
+                    "customer_id": "Este cliente já possui orçamento em rascunho ou enviado. Converta ou finalize o orçamento antes de abrir uma OS avulsa."
                 })
         if order_type == WorkOrder.OrderType.WARRANTY and not reference_work_order:
             raise serializers.ValidationError({"reference_work_order_id": "Informe a OS de referencia quando o tipo for garantia."})
@@ -641,7 +663,7 @@ class WorkOrderSerializer(serializers.ModelSerializer):
 
 class WorkOrderListSerializer(WorkOrderSerializer):
     class Meta(WorkOrderSerializer.Meta):
-        fields = ["id", "number", "customer_name", "vehicle_display", "title", "status", "status_label", "priority", "priority_label", "promised_at", "assigned_to_name", "grand_total", "paid_total", "balance_due", "available_status_transitions", "can_edit", "has_pending_approval", "requires_revision_estimate", "approved_at", "cancelled_at", "cancellation_reason", "created_at", "updated_at"]
+        fields = ["id", "number", "customer_name", "vehicle_display", "title", "status", "status_label", "financial_status", "financial_status_label", "priority", "priority_label", "promised_at", "assigned_to_name", "grand_total", "paid_total", "balance_due", "available_status_transitions", "can_edit", "has_pending_approval", "requires_revision_estimate", "approved_at", "cancelled_at", "cancellation_reason", "created_at", "updated_at"]
         read_only_fields = fields
 
 
