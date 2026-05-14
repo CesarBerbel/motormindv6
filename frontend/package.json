@@ -13,21 +13,21 @@
     "test:security": "vitest run --environment jsdom --pool=forks --poolOptions.forks.singleFork=true src/utils/sanitizeHtml.test.js"
   },
   "dependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.21",
     "axios": "^1.7.9",
     "dompurify": "^3.2.3",
+    "postcss": "^8.5.6",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-quill-new": "3.6.0",
-    "react-router-dom": "^6.28.1"
+    "react-router-dom": "^6.28.1",
+    "tailwindcss": "^3.4.17",
+    "vite": "^5.4.11"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^4.3.4",
-    "vite": "^5.4.11",
-    "vitest": "^3.2.4",
     "jsdom": "^26.1.0",
-    "tailwindcss": "^3.4.17",
-    "postcss": "^8.5.6",
-    "autoprefixer": "^10.4.21"
+    "vitest": "^3.2.4"
   },
   "overrides": {
     "quill": "2.0.2"

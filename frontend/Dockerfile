@@ -1,19 +1,19 @@
 FROM node:20-alpine AS build
 WORKDIR /app
 
-# O build do Vite/Tailwind precisa das devDependencies.
-# Esta versao e resistente a ambientes Windows porque remove qualquer
-# node_modules/dist copiado do host antes de instalar dentro do Linux.
+# O Vite/Tailwind rodam apenas no stage de build. Mantemos NODE_ENV
+# em development para impedir que o npm omita dependencias necessarias.
 ENV NODE_ENV=development
 ENV NPM_CONFIG_PRODUCTION=false
+ENV NPM_CONFIG_OMIT=""
 ENV CI=true
 
+COPY package.json package-lock.json ./
+RUN npm ci --include=dev --no-audit --no-fund
+RUN node -e "require.resolve('vite/package.json'); console.log('vite OK')"
+
 COPY . .
-RUN rm -rf node_modules dist \
-    && npm config set production false \
-    && npm ci --include=dev --no-audit --no-fund \
-    && node -e "require.resolve('vite/package.json'); console.log('vite OK')" \
-    && npm run build
+RUN rm -rf dist && npm run build
 
 FROM nginx:1.27-alpine
 COPY --from=build /app/dist /usr/share/nginx/html
