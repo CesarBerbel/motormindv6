@@ -1,20 +1,25 @@
-FROM node:20-alpine AS build
+FROM node:20-bookworm-slim AS build
 WORKDIR /app
 
-# Copia primeiro todo o frontend e remove qualquer artefato vindo do host
-# antes da instalacao. Isso evita sobrescrever node_modules Linux com
-# node_modules do Windows no passo COPY.
-ENV CI=true
+# Build deterministico para producao. O Docker instala somente dependencies
+# porque vite/tailwind/postcss ja estao em dependencies; vitest/jsdom ficam fora.
+ENV CI=true \
+    NODE_ENV=production \
+    NPM_CONFIG_AUDIT=false \
+    NPM_CONFIG_FUND=false \
+    NPM_CONFIG_PROGRESS=false \
+    NPM_CONFIG_FETCH_RETRIES=5 \
+    NPM_CONFIG_FETCH_RETRY_MINTIMEOUT=20000 \
+    NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT=120000 \
+    NPM_CONFIG_REGISTRY=https://registry.npmjs.org/
 
 COPY . .
 RUN rm -rf node_modules dist .vite
 
-# Instala as dependencias de build depois do COPY para garantir que vite
-# exista no ambiente Linux da imagem final de build.
-RUN npm ci --include=dev --no-audit --no-fund
+# Nao instala devDependencies no build Docker. Isso evita downloads lentos de
+# jsdom/vitest e remove os avisos de whatwg-encoding/lodash.isequal.
+RUN npm ci --omit=dev --no-audit --no-fund --loglevel=notice
 RUN node -e "require.resolve('vite/package.json'); console.log('vite OK')"
-
-# Chama o Vite diretamente para nao depender do PATH do npm script.
 RUN node ./node_modules/vite/bin/vite.js build
 
 FROM nginx:1.27-alpine
